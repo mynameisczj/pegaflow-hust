@@ -14,7 +14,7 @@ mod allocator;
 mod backing;
 mod block;
 mod cache;
-pub(crate) mod device;
+pub mod device;
 mod gpu_worker;
 mod instance;
 mod internode;

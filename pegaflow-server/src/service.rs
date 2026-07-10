@@ -89,7 +89,7 @@ impl GrpcEngineService {
                 Status::failed_precondition(err.to_string())
             }
             EngineError::TopologyMismatch(_) => Status::failed_precondition(err.to_string()),
-            EngineError::CudaInit(_) | EngineError::Storage(_) | EngineError::Poisoned(_) => {
+            EngineError::DeviceInit(_) | EngineError::Storage(_) | EngineError::Poisoned(_) => {
                 Status::internal(err.to_string())
             }
         }

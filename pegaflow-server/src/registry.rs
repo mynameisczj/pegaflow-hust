@@ -184,7 +184,7 @@ impl DeviceTensorRegistry {
             let pickle = py.import("pickle")?;
 
             // Select the correct device runtime based on what is available.
-            let dev: PyObject = if let Ok(npu) = torch.getattr("npu") {
+            let dev: Py<PyAny> = if let Ok(npu) = torch.getattr("npu") {
                 npu.call_method1("set_device", (device_id,))?;
                 npu.into()
             } else {
@@ -329,7 +329,7 @@ impl RegistryHandle {
 
 /// Owns the registry and drains commands serially. Each op runs synchronously
 /// on this thread, so a GIL/CUDA stall blocks only here.
-fn registry_actor(mut registry: CudaTensorRegistry, mut rx: mpsc::Receiver<RegistryCommand>) {
+fn registry_actor(mut registry: DeviceTensorRegistry, mut rx: mpsc::Receiver<RegistryCommand>) {
     while let Some(cmd) = rx.blocking_recv() {
         match cmd {
             RegistryCommand::RegisterLayers {
@@ -364,7 +364,7 @@ mod tests {
 
     #[test]
     fn drop_context_removes_only_that_context() {
-        let mut registry = CudaTensorRegistry::empty();
+        let mut registry = DeviceTensorRegistry::empty();
         registry
             .contexts
             .insert("instance-a:tp0:pp0:dev0".to_string(), ContextState::new(0));
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn register_layers_rejects_existing_context_before_materializing() {
-        let mut registry = CudaTensorRegistry::empty();
+        let mut registry = DeviceTensorRegistry::empty();
         registry
             .contexts
             .insert("instance-a:tp0:pp0:dev0".to_string(), ContextState::new(7));

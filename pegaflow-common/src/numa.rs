@@ -6,7 +6,7 @@
 //! This module provides:
 //! - NUMA node abstraction (`NumaNode`)
 //! - System NUMA topology detection (CPU-to-node mapping)
-//! - GPU to NUMA node affinity detection
+//! - Device to NUMA node affinity detection (nvidia-smi for CUDA, npu-smi for Ascend)
 //! - Thread-to-NUMA-node pinning for first-touch allocation policy
 
 use std::collections::HashMap;
@@ -257,13 +257,132 @@ where
 }
 
 // ============================================================================
-// GPU NUMA affinity
+// Device NUMA affinity — npu-smi (Ascend NPU)
+// ============================================================================
+
+/// Discover NPU device count via `npu-smi info -t board`.
+///
+/// Parses the output to count how many NPU chips are present.
+/// Falls back to counting `/sys/class/davinci/davinci*` entries
+/// if `npu-smi` is not available.
+fn get_npu_device_count() -> Option<u32> {
+    // Primary: use npu-smi
+    if let Ok(output) = Command::new("npu-smi")
+        .args(["info", "-t", "board", "-c", "0"])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // npu-smi info -t board outputs lines with chip/device info.
+            // Count lines that look like "NPU ID" / "Chip ID" entries.
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("Count") || trimmed.starts_with("Chip Count") {
+                    if let Some(val) = trimmed.split(':').nth(1) {
+                        if let Ok(count) = val.trim().parse::<u32>() {
+                            return Some(count);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: count /sys/class/davinci devices
+    if let Ok(entries) = fs::read_dir("/sys/class/davinci") {
+        let count = entries.filter_map(|e| e.ok()).count();
+        if count > 0 {
+            return Some(count as u32);
+        }
+    }
+
+    None
+}
+
+/// Get the NUMA node for an Ascend NPU device.
+///
+/// Strategy (ordered by preference):
+/// 1. Read `/sys/class/davinci/davinci{device_id}/device/numa_node`
+///    (most reliable, direct kernel interface).
+/// 2. Parse `npu-smi info -t topo -i {device_id}` output.
+///
+/// Returns `NumaNode::UNKNOWN` if all methods fail.
+fn get_npu_numa_node(device_id: u32) -> NumaNode {
+    // Method 1: sysfs (fastest, most reliable, no external binary needed)
+    let numa_node_path = format!("/sys/class/davinci/davinci{device_id}/device/numa_node");
+    if let Ok(content) = fs::read_to_string(&numa_node_path) {
+        if let Ok(node) = content.trim().parse::<i32>() {
+            if node >= 0 {
+                return NumaNode(node as u32);
+            }
+        }
+    }
+
+    // Method 2: npu-smi topology query
+    if let Ok(output) = Command::new("npu-smi")
+        .args([
+            "info",
+            "-t",
+            "topo",
+            "-i",
+            &device_id.to_string(),
+        ])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // npu-smi topo output may contain NUMA affinity info.
+            // Look for lines like "NUMA Node: 1" or "numa_node: 1".
+            for line in stdout.lines() {
+                let lower = line.to_lowercase();
+                if lower.contains("numa") && lower.contains("node") {
+                    // Try to extract the first number from this line.
+                    if let Some(node) = parse_first_int(line) {
+                        return NumaNode(node);
+                    }
+                }
+            }
+        }
+    }
+
+    NumaNode::UNKNOWN
+}
+
+/// Extract the first unsigned integer from a string.
+fn parse_first_int(s: &str) -> Option<u32> {
+    for token in s.split(|c: char| !c.is_ascii_digit()) {
+        if !token.is_empty() {
+            if let Ok(n) = token.parse::<u32>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// Get NUMA affinity for all available NPU devices.
+///
+/// Returns `(device_id, numa_node)` pairs. Returns an empty vector
+/// if no NPU devices are found.
+fn get_npu_numa_affinity() -> Vec<(u32, NumaNode)> {
+    let count = match get_npu_device_count() {
+        Some(n) => n,
+        None => return Vec::new(),
+    };
+
+    (0..count)
+        .map(|device_id| (device_id, get_npu_numa_node(device_id)))
+        .collect()
+}
+
+// ============================================================================
+// Device NUMA affinity — nvidia-smi (CUDA GPU, legacy)
 // ============================================================================
 
 /// Get the NUMA node for a GPU device via nvidia-smi.
 ///
 /// Returns `NumaNode::UNKNOWN` if nvidia-smi is unavailable or fails.
-fn get_device_numa_node(device_id: u32) -> NumaNode {
+fn get_gpu_numa_node(device_id: u32) -> NumaNode {
     let output = match Command::new("nvidia-smi")
         .args([
             "topo",
@@ -290,7 +409,7 @@ fn get_device_numa_node(device_id: u32) -> NumaNode {
     NumaNode::UNKNOWN
 }
 
-/// Get NUMA affinity for all available GPUs.
+/// Get NUMA affinity for all available GPUs via nvidia-smi.
 ///
 /// Returns (device_id, numa_node) pairs. Empty if nvidia-smi is unavailable.
 fn get_gpu_numa_affinity() -> Vec<(u32, NumaNode)> {
@@ -321,31 +440,56 @@ fn get_gpu_numa_affinity() -> Vec<(u32, NumaNode)> {
     };
 
     (0..count)
-        .map(|device_id| (device_id, get_device_numa_node(device_id)))
+        .map(|device_id| (device_id, get_gpu_numa_node(device_id)))
         .collect()
+}
+
+// ============================================================================
+// Unified device NUMA discovery (NPU preferred, GPU fallback)
+// ============================================================================
+
+/// Auto-detect device NUMA affinity.
+///
+/// Probes NPU devices first via `npu-smi` / sysfs. If none found,
+/// falls back to `nvidia-smi` for GPU devices.
+fn get_device_numa_affinity() -> Vec<(u32, NumaNode)> {
+    let npu_affinity = get_npu_numa_affinity();
+    if !npu_affinity.is_empty() {
+        log::debug!("Detected {} NPU device(s) via npu-smi/sysfs", npu_affinity.len());
+        return npu_affinity;
+    }
+
+    let gpu_affinity = get_gpu_numa_affinity();
+    if !gpu_affinity.is_empty() {
+        log::debug!("Detected {} GPU device(s) via nvidia-smi", gpu_affinity.len());
+        return gpu_affinity;
+    }
+
+    Vec::new()
 }
 
 // ============================================================================
 // NumaTopology
 // ============================================================================
 
-/// GPU-to-NUMA topology for the system.
+/// Device-to-NUMA topology for the system.
 ///
 /// Built once during engine initialization. Provides efficient lookup
-/// of NUMA affinity for GPU devices.
+/// of NUMA affinity for GPU/NPU devices.
 #[derive(Debug, Clone)]
 pub struct NumaTopology {
-    gpu_numa_map: HashMap<i32, NumaNode>,
+    device_numa_map: HashMap<i32, NumaNode>,
     numa_nodes: Vec<NumaNode>,
 }
 
 impl NumaTopology {
-    /// Detect and build the GPU-NUMA topology.
+    /// Detect and build the device-NUMA topology.
     ///
-    /// Queries nvidia-smi for GPU NUMA affinity and reads system NUMA topology.
+    /// Queries npu-smi (preferred) or nvidia-smi (fallback) for device
+    /// NUMA affinity and reads system NUMA topology from sysfs.
     pub fn detect() -> Self {
-        let gpu_affinity = get_gpu_numa_affinity();
-        let gpu_numa_map: HashMap<i32, NumaNode> = gpu_affinity
+        let device_affinity = get_device_numa_affinity();
+        let device_numa_map: HashMap<i32, NumaNode> = device_affinity
             .into_iter()
             .map(|(dev, node)| (dev as i32, node))
             .collect();
@@ -362,16 +506,16 @@ impl NumaTopology {
         };
 
         Self {
-            gpu_numa_map,
+            device_numa_map,
             numa_nodes,
         }
     }
 
-    /// Get the preferred NUMA node for a GPU device.
+    /// Get the preferred NUMA node for a device (NPU or GPU).
     ///
     /// Returns `NumaNode::UNKNOWN` if the device is not found.
     pub fn numa_for_gpu(&self, device_id: i32) -> NumaNode {
-        self.gpu_numa_map
+        self.device_numa_map
             .get(&device_id)
             .copied()
             .unwrap_or(NumaNode::UNKNOWN)
@@ -382,10 +526,10 @@ impl NumaTopology {
         &self.numa_nodes
     }
 
-    /// Get all valid NUMA nodes that have at least one GPU attached.
+    /// Get all valid NUMA nodes that have at least one device attached.
     pub fn gpu_numa_nodes(&self) -> Vec<NumaNode> {
         let mut nodes: Vec<NumaNode> = self
-            .gpu_numa_map
+            .device_numa_map
             .values()
             .copied()
             .filter(NumaNode::is_valid)
@@ -407,16 +551,16 @@ impl NumaTopology {
 
     /// Log the detected topology.
     pub fn log_summary(&self) {
-        log::info!("=== GPU-NUMA Topology ===");
+        log::info!("=== Device-NUMA Topology ===");
         log::info!("NUMA nodes: {}", self.num_nodes());
 
-        if self.gpu_numa_map.is_empty() {
-            log::warn!("No GPU NUMA affinity detected (nvidia-smi unavailable?)");
+        if self.device_numa_map.is_empty() {
+            log::warn!("No device NUMA affinity detected (npu-smi / nvidia-smi unavailable?)");
         } else {
-            let mut devices: Vec<_> = self.gpu_numa_map.iter().collect();
+            let mut devices: Vec<_> = self.device_numa_map.iter().collect();
             devices.sort_by_key(|(dev, _)| *dev);
             for (dev, node) in devices {
-                log::info!("  GPU {} -> {}", dev, node);
+                log::info!("  Device {} -> {}", dev, node);
             }
         }
     }
@@ -560,7 +704,7 @@ mod tests {
     #[test]
     fn test_gpu_numa_nodes_are_valid_sorted_unique() {
         let topology = NumaTopology {
-            gpu_numa_map: HashMap::from([
+            device_numa_map: HashMap::from([
                 (0, NumaNode(3)),
                 (1, NumaNode(3)),
                 (2, NumaNode::UNKNOWN),
