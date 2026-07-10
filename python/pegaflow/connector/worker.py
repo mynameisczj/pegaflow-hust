@@ -268,6 +268,17 @@ class WorkerConnector:
         if not kv_caches:
             raise RuntimeError("No KV cache layers were selected for registration")
 
+        # Flatten any tuple kv-cache entries (e.g. (k_cache, v_cache) from
+        # Ascend prefill-disaggregation) into a flat dict of tensors.
+        flat_kv_caches: dict[str, torch.Tensor] = {}
+        for layer_name, kv_cache in kv_caches.items():
+            if isinstance(kv_cache, tuple):
+                for idx, t in enumerate(kv_cache):
+                    flat_kv_caches[f"{layer_name}_{'k' if idx == 0 else 'v'}"] = t
+            else:
+                flat_kv_caches[layer_name] = kv_cache
+        kv_caches = flat_kv_caches
+
         self._registered_layers = list(kv_caches.keys())
         self._page_first = self._use_page_first()
         self._torch_device = next(iter(kv_caches.values())).device
@@ -288,11 +299,12 @@ class WorkerConnector:
         split_logical_blocks = 0
 
         for layer_name, kv_cache in kv_caches.items():
-            assert kv_cache.storage_offset() == 0, (
-                f"KV cache for {layer_name} must have zero storage offset"
-            )
-
             wrapper = self._ipc_wrapper_factory(kv_cache)
+            # The wrapper stores the local device index (after
+            # ASCEND_VISIBLE_DEVICES remapping), but register_context_batch
+            # expects the globally-mapped device ID. Patch it here so the
+            # tensor metadata matches the context's device_id.
+            wrapper.device_index = self._ctx.device_id
             wrapper_bytes = pickle.dumps(wrapper)
 
             registration = _infer_kv_cache_registration(

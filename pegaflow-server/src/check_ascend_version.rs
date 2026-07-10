@@ -24,9 +24,12 @@ impl std::fmt::Debug for AscendVersionError {
 
 impl std::error::Error for AscendVersionError {}
 
-/// Minimum CANN version required: 8.5.0.
-const MIN_MAJOR: i32 = 8;
-const MIN_MINOR: i32 = 5;
+/// Minimum CANN runtime version required.  `aclrtGetVersion` returns the
+/// *runtime* version of the CANN stack, not the toolkit packaging version.
+/// For CANN toolkit 8.5.0, the runtime version is 1.16.0.
+/// For CANN toolkit 8.5.1, the runtime version may be 1.16.0 or 1.16.x.
+const MIN_MAJOR: i32 = 1;
+const MIN_MINOR: i32 = 16;
 const MIN_PATCH: i32 = 0;
 
 /// Run the Ascend runtime version preflight check.
