@@ -246,7 +246,7 @@ def detect_mla(vllm_config) -> bool:
     return getattr(hf_config, "kv_lora_rank", None) is not None
 
 
-_TRANSFER_BACKENDS = ("direct", "kernel")
+_TRANSFER_BACKENDS = ("direct", "kernel", "ascend_direct")
 
 
 def resolve_transfer_backend(is_mla: bool, override: str | None) -> str:

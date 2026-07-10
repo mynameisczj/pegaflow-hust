@@ -5,6 +5,10 @@ cross-process NPU memory sharing via CANN IPC keys. The wrapper can be
 serialized (via pickle) and sent across process boundaries.
 
 This is the Ascend equivalent of CudaIPCWrapper (ipc_wrapper.py).
+
+The IPC primitives are implemented via two paths:
+1. C extension (``npu_ipc_bindings._npu_ipc``) — preferred for lower overhead.
+2. ctypes fallback against ``libascendcl.so`` — always available.
 """
 
 import ctypes
@@ -14,7 +18,17 @@ import torch
 
 
 # ---------------------------------------------------------------------------
-# CANN IPC C-level bindings via ctypes
+# CANN IPC constants
+# ---------------------------------------------------------------------------
+
+ACL_SUCCESS = 0
+ACL_RT_IPC_MEM_EXPORT_FLAG_DEFAULT = 0x0
+ACL_RT_IPC_MEM_IMPORT_FLAG_DEFAULT = 0x0
+NPU_IPC_MAX_KEY_LEN = 256
+
+
+# ---------------------------------------------------------------------------
+# CANN IPC C-level bindings via ctypes (fallback path)
 # ---------------------------------------------------------------------------
 
 def _load_libascendcl():
@@ -68,14 +82,8 @@ def _lib():
         return _libascendcl
 
 
-ACL_SUCCESS = 0
-ACL_RT_IPC_MEM_EXPORT_FLAG_DEFAULT = 0x0
-ACL_RT_IPC_MEM_IMPORT_FLAG_DEFAULT = 0x0
-NPU_IPC_MAX_KEY_LEN = 256
-
-
-def _npu_ipc_export_key(dev_ptr: int, size: int) -> bytes:
-    """Export a CANN IPC key for the given NPU memory region.
+def _npu_ipc_export_key_ctypes(dev_ptr: int, size: int) -> bytes:
+    """Export a CANN IPC key for the given NPU memory region (ctypes path).
 
     Returns the key as bytes suitable for serialisation.
     """
@@ -95,8 +103,8 @@ def _npu_ipc_export_key(dev_ptr: int, size: int) -> bytes:
     return key_buf.value
 
 
-def _npu_ipc_import_key(key: bytes) -> int:
-    """Import NPU memory via a CANN IPC key.
+def _npu_ipc_import_key_ctypes(key: bytes) -> int:
+    """Import NPU memory via a CANN IPC key (ctypes path).
 
     Returns the device virtual address (integer) of the imported memory.
     """
@@ -113,9 +121,29 @@ def _npu_ipc_import_key(key: bytes) -> int:
     return dev_ptr.value or 0
 
 
-def _npu_ipc_close(key: bytes) -> None:
-    """Release a CANN IPC key. Idempotent."""
+def _npu_ipc_close_ctypes(key: bytes) -> None:
+    """Release a CANN IPC key (ctypes path). Idempotent."""
     _lib().aclrtIpcMemClose(ctypes.c_char_p(key))
+
+
+# ---------------------------------------------------------------------------
+# Try the C extension for lower overhead
+# ---------------------------------------------------------------------------
+
+_C_EXT_AVAILABLE = False
+try:
+    from npu_ipc_bindings._npu_ipc import (  # type: ignore[import-untyped]
+        export_key as _npu_ipc_export_key_c,
+        import_key as _npu_ipc_import_key_c,
+        close_key as _npu_ipc_close_key_c,
+    )
+    _C_EXT_AVAILABLE = True
+except ImportError:
+    pass
+
+_npu_ipc_export_key = _npu_ipc_export_key_c if _C_EXT_AVAILABLE else _npu_ipc_export_key_ctypes
+_npu_ipc_import_key = _npu_ipc_import_key_c if _C_EXT_AVAILABLE else _npu_ipc_import_key_ctypes
+_npu_ipc_close = _npu_ipc_close_key_c if _C_EXT_AVAILABLE else _npu_ipc_close_ctypes
 
 
 # ---------------------------------------------------------------------------
@@ -137,9 +165,11 @@ class NpuIPCWrapper:
     that allocator.  Standard ``torch.npu.empty`` tensors allocated through
     the default CANN allocator are **not** IPC-exportable.
 
-    Device identification uses NPU UUIDs (obtained from
-    ``torch.npu.get_device_properties``) so that ``ASCEND_VISIBLE_DEVICES``
-    remapping is handled correctly.
+    The wrapper stores the NPU device index directly (rather than using
+    UUID-based discovery).  Ascend NPU UUIDs may be non-unique (e.g. all
+    zero), so UUID-based remapping is unreliable.  This is safe because
+    both the vLLM worker and the pegaflow-server process share the same
+    ``ASCEND_VISIBLE_DEVICES`` environment variable and device ordering.
 
     Attributes:
         key: CANN IPC export key bytes (C string from aclrtIpcMemGetExportKey).
@@ -147,44 +177,8 @@ class NpuIPCWrapper:
         shape: Shape tuple of the tensor.
         stride: Stride tuple of the tensor.
         storage_offset: Storage offset (must be zero).
-        device_uuid: UUID string of the NPU device.
+        device_index: NPU device index (relative to ASCEND_VISIBLE_DEVICES).
     """
-
-    _discovered_device_mapping: dict[str, int] = {}
-    _device_mapping_lock = threading.Lock()
-
-    # ------------------------------------------------------------------
-    # Device discovery (analogous to CudaIPCWrapper)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _get_device_uuid(device_index: int) -> str:
-        return str(torch.npu.get_device_properties(device_index).uuid)
-
-    @staticmethod
-    def _discover_npu_devices() -> None:
-        if not torch.npu.is_available():
-            return
-
-        num_devices = torch.npu.device_count()
-        with NpuIPCWrapper._device_mapping_lock:
-            if NpuIPCWrapper._discovered_device_mapping:
-                return
-            for i in range(num_devices):
-                device_uuid = NpuIPCWrapper._get_device_uuid(i)
-                NpuIPCWrapper._discovered_device_mapping[device_uuid] = i
-
-    @staticmethod
-    def _get_device_index_from_uuid(device_uuid: str) -> int:
-        NpuIPCWrapper._discover_npu_devices()
-        with NpuIPCWrapper._device_mapping_lock:
-            device_index = NpuIPCWrapper._discovered_device_mapping.get(device_uuid)
-        if device_index is None:
-            raise RuntimeError(
-                f"Device UUID {device_uuid} not found. "
-                "Make sure the process can see all NPU devices."
-            )
-        return device_index
 
     # ------------------------------------------------------------------
     # Core IPC export / import
@@ -213,8 +207,12 @@ class NpuIPCWrapper:
         self.stride = tensor.stride()
         self.storage_offset = tensor.storage_offset()
 
-        device_index = tensor.device.index
-        self.device_uuid = NpuIPCWrapper._get_device_uuid(device_index)
+        # Store the device index directly.  Unlike CUDA where
+        # CUDA_VISIBLE_DEVICES remapping requires UUID-based discovery,
+        # Ascend NPU UUIDs are often non-unique (e.g. all zero).  Both
+        # the vLLM worker and pegaflow-server share the same
+        # ASCEND_VISIBLE_DEVICES environment, so the raw index is stable.
+        self.device_index = tensor.device.index
 
     def to_tensor(self) -> torch.Tensor:
         """Reconstruct a tensor that shares the original NPU memory.
@@ -223,17 +221,13 @@ class NpuIPCWrapper:
         ``__init__``, then constructs a ``torch.Tensor`` that points to
         the imported device virtual address.
         """
-        device = NpuIPCWrapper._get_device_index_from_uuid(self.device_uuid)
+        device = self.device_index
 
         dev_ptr = _npu_ipc_import_key(self.key)
 
         if dev_ptr == 0:
             raise RuntimeError("aclrtIpcMemImportByKey returned NULL pointer")
 
-        # Build a torch tensor from the raw NPU pointer.
-        # We use a zero-size host tensor, move it to NPU, then point its
-        # storage at the imported memory.  This is the same pattern
-        # CudaIPCWrapper uses.
         numel = 1
         for s in self.shape:
             numel *= s
@@ -271,7 +265,7 @@ class NpuIPCWrapper:
             self.shape,
             self.stride,
             self.storage_offset,
-            self.device_uuid,
+            self.device_index,
         )
 
     def __setstate__(self, state):
@@ -281,7 +275,7 @@ class NpuIPCWrapper:
             self.shape,
             self.stride,
             self.storage_offset,
-            self.device_uuid,
+            self.device_index,
         ) = state
 
     def __eq__(self, other) -> bool:
@@ -293,14 +287,14 @@ class NpuIPCWrapper:
             and self.shape == other.shape
             and getattr(self, "stride", None) == getattr(other, "stride", None)
             and getattr(self, "storage_offset", 0) == getattr(other, "storage_offset", 0)
-            and self.device_uuid == other.device_uuid
+            and self.device_index == other.device_index
         )
 
     def __repr__(self) -> str:
         return (
             f"NpuIPCWrapper(shape={self.shape}, dtype={self.dtype}, "
             f"stride={getattr(self, 'stride', None)}, "
-            f"device_uuid={self.device_uuid})"
+            f"device_index={self.device_index})"
         )
 
 
