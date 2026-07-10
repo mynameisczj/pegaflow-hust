@@ -64,6 +64,22 @@ unsafe extern "C" {
         stream: aclrtStream,
     ) -> aclError;
 
+    /// Synchronous memory copy.
+    /// `kind`: 1 = HOST_TO_DEVICE, 2 = DEVICE_TO_HOST, 3 = HOST_TO_HOST, 4 = DEVICE_TO_DEVICE.
+    fn aclrtMemcpy(
+        dst: *mut c_void,
+        dst_max: usize,
+        src: *const c_void,
+        count: usize,
+        kind: i32,
+    ) -> aclError;
+
+    /// Allocate device memory on the current device.
+    fn aclrtMalloc(ptr: *mut *mut c_void, size: usize, policy: i32) -> aclError;
+
+    /// Free device memory.
+    fn aclrtFree(ptr: *mut c_void) -> aclError;
+
     /// Allocate pinned host memory (DMA-capable).
     fn aclrtMallocHost(ptr: *mut *mut c_void, size: usize) -> aclError;
 
@@ -313,6 +329,79 @@ pub fn memcpy_d2h_async(
     if ret != ACL_ERROR_NONE {
         return Err(format!(
             "aclrtMemcpyAsync(D2H) failed: error code {ret}, size={size}"
+        ));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Ascend Device Allocation (for integration tests — not used in production paths)
+// ---------------------------------------------------------------------------
+
+/// Allocate device memory via `aclrtMalloc`. Returns a raw device pointer as `u64`.
+///
+/// `policy` is the ACL memory policy (typically 0 for default).
+pub fn malloc_device(size: usize, policy: i32) -> Result<u64, String> {
+    ensure_acl_initialized()?;
+    if size == 0 {
+        return Err("aclrtMalloc: size must be > 0".into());
+    }
+    let mut ptr: *mut c_void = std::ptr::null_mut();
+    let ret = unsafe { aclrtMalloc(&mut ptr, size, policy) };
+    if ret != ACL_ERROR_NONE {
+        return Err(format!("aclrtMalloc({size}) failed: error code {ret}"));
+    }
+    if ptr.is_null() {
+        return Err("aclrtMalloc returned null".into());
+    }
+    Ok(ptr as u64)
+}
+
+/// Free device memory allocated by `aclrtMalloc`.
+pub fn free_device(ptr: u64) -> Result<(), String> {
+    ensure_acl_initialized()?;
+    let ret = unsafe { aclrtFree(ptr as *mut c_void) };
+    if ret != ACL_ERROR_NONE {
+        return Err(format!("aclrtFree failed: error code {ret}"));
+    }
+    Ok(())
+}
+
+/// Synchronous host-to-device memory copy (blocking, no stream needed).
+pub fn memcpy_h2d_sync(dst_device: u64, src_host: *const u8, size: usize) -> Result<(), String> {
+    ensure_acl_initialized()?;
+    let ret = unsafe {
+        aclrtMemcpy(
+            dst_device as *mut c_void,
+            size,
+            src_host as *const c_void,
+            size,
+            ACL_MEMCPY_HOST_TO_DEVICE,
+        )
+    };
+    if ret != ACL_ERROR_NONE {
+        return Err(format!(
+            "aclrtMemcpy(H2D sync) failed: error code {ret}, size={size}"
+        ));
+    }
+    Ok(())
+}
+
+/// Synchronous device-to-host memory copy (blocking, no stream needed).
+pub fn memcpy_d2h_sync(dst_host: *mut u8, src_device: u64, size: usize) -> Result<(), String> {
+    ensure_acl_initialized()?;
+    let ret = unsafe {
+        aclrtMemcpy(
+            dst_host as *mut c_void,
+            size,
+            src_device as *const c_void,
+            size,
+            ACL_MEMCPY_DEVICE_TO_HOST,
+        )
+    };
+    if ret != ACL_ERROR_NONE {
+        return Err(format!(
+            "aclrtMemcpy(D2H sync) failed: error code {ret}, size={size}"
         ));
     }
     Ok(())

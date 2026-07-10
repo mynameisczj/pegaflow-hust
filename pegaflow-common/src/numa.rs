@@ -265,7 +265,11 @@ where
 /// Parses the output to count how many NPU chips are present.
 /// Falls back to counting `/sys/class/davinci/davinci*` entries
 /// if `npu-smi` is not available.
-fn get_npu_device_count() -> Option<u32> {
+///
+/// This function is public so that integration tests can verify
+/// NPU detection and NUMA affinity parsing without linking against
+/// the CANN runtime.
+pub fn get_npu_device_count() -> Option<u32> {
     // Primary: use npu-smi
     if let Ok(output) = Command::new("npu-smi")
         .args(["info", "-t", "board", "-c", "0"])
@@ -307,7 +311,10 @@ fn get_npu_device_count() -> Option<u32> {
 /// 2. Parse `npu-smi info -t topo -i {device_id}` output.
 ///
 /// Returns `NumaNode::UNKNOWN` if all methods fail.
-fn get_npu_numa_node(device_id: u32) -> NumaNode {
+///
+/// This function is public so that integration tests can verify
+/// NUMA node assignment for Ascend NPUs.
+pub fn get_npu_numa_node(device_id: u32) -> NumaNode {
     // Method 1: sysfs (fastest, most reliable, no external binary needed)
     let numa_node_path = format!("/sys/class/davinci/davinci{device_id}/device/numa_node");
     if let Ok(content) = fs::read_to_string(&numa_node_path) {
@@ -364,7 +371,10 @@ fn parse_first_int(s: &str) -> Option<u32> {
 ///
 /// Returns `(device_id, numa_node)` pairs. Returns an empty vector
 /// if no NPU devices are found.
-fn get_npu_numa_affinity() -> Vec<(u32, NumaNode)> {
+///
+/// This function is public so that integration tests can verify
+/// the full NPU-to-NUMA topology detection path.
+pub fn get_npu_numa_affinity() -> Vec<(u32, NumaNode)> {
     let count = match get_npu_device_count() {
         Some(n) => n,
         None => return Vec::new(),
@@ -756,5 +766,123 @@ mod tests {
         for node in &nodes {
             assert!(node.is_valid());
         }
+    }
+
+    // --- Layer 5: NPU device detection & NUMA affinity tests ---
+
+    /// Test: `get_npu_device_count()` returns Some(≥1) when npu-smi or
+    /// /sys/class/davinci are available, or None when neither is found.
+    #[test]
+    fn test_get_npu_device_count() {
+        // This probe does not require CANN runtime — it reads from
+        // npu-smi or /sys/class/davinci.
+        match get_npu_device_count() {
+            Some(count) => {
+                assert!(count >= 1, "NPU device count must be >= 1");
+                eprintln!("INFO: detected {count} NPU device(s)");
+            }
+            None => {
+                eprintln!("INFO: no NPU devices found (this is OK on non-Ascend systems)");
+            }
+        }
+    }
+
+    /// Test: `get_npu_numa_node()` returns a valid NUMA node when
+    /// npu-smi / sysfs is available. On systems without NPUs, it
+    /// should return `NumaNode::UNKNOWN`.
+    #[test]
+    fn test_get_npu_numa_node_for_device0() {
+        let node = get_npu_numa_node(0);
+        match get_npu_device_count() {
+            Some(count) if count >= 1 => {
+                // We expect a valid NUMA node if davinci0/device/numa_node exists.
+                if std::path::Path::new(
+                    "/sys/class/davinci/davinci0/device/numa_node",
+                )
+                .exists()
+                {
+                    assert!(
+                        node.is_valid(),
+                        "NPU device 0 exists but NUMA node is UNKNOWN"
+                    );
+                    eprintln!("INFO: NPU device 0 NUMA node = {node}");
+                }
+            }
+            _ => {
+                // No NPU devices — NUMA node should be UNKNOWN.
+                assert!(node.is_unknown(), "no NPU but NUMA node is {node}?");
+            }
+        }
+    }
+
+    /// Test: `get_npu_numa_affinity()` returns a complete list of
+    /// (device_id, numa_node) when NPU devices exist.
+    #[test]
+    fn test_get_npu_numa_affinity() {
+        let affinity = get_npu_numa_affinity();
+        if affinity.is_empty() {
+            eprintln!("INFO: no NPU NUMA affinity detected (OK on non-Ascend systems)");
+            return;
+        }
+
+        eprintln!("INFO: NPU NUMA affinity: {affinity:?}");
+        // Verify each device has a valid NUMA node.
+        for (device_id, node) in &affinity {
+            assert!(
+                node.is_valid(),
+                "device {device_id} has UNKNOWN NUMA node"
+            );
+        }
+        // Device IDs should be consecutive from 0.
+        for (i, (device_id, _)) in affinity.iter().enumerate() {
+            assert_eq!(
+                *device_id as usize, i,
+                "device IDs should be consecutive starting from 0"
+            );
+        }
+    }
+
+    /// Test: `NumaTopology::detect()` picks up NPU devices when available
+    /// and never panics.
+    #[test]
+    fn test_numa_topology_detect_with_npu() {
+        let topology = NumaTopology::detect();
+        assert!(topology.num_nodes() >= 1, "should have at least 1 NUMA node");
+
+        let npu_count = get_npu_device_count();
+        if let Some(expected) = npu_count
+            && expected > 0
+        {
+            // When NPU devices exist, they should be in the topology map.
+            let node0 = topology.numa_for_gpu(0);
+            assert!(
+                node0.is_valid(),
+                "NPU device 0 should have a valid NUMA node in topology"
+            );
+        }
+
+        // log_summary should not panic.
+        topology.log_summary();
+    }
+
+    /// Test: NPU device count can be discovered via sysfs fallback
+    /// when npu-smi is not available.
+    #[test]
+    fn test_fallback_to_sysfs_davinci_count() {
+        // In the CI environment, npu-smi may not exist but /sys/class/davinci
+        // might. Verify that the fallback path doesn't panic.
+        let result = get_npu_device_count();
+        // Just checking it doesn't panic is sufficient.
+        let _ = result;
+    }
+
+    /// Test: `parse_first_int` extracts integers correctly.
+    #[test]
+    fn test_parse_first_int() {
+        assert_eq!(parse_first_int("NUMA Node: 1"), Some(1));
+        assert_eq!(parse_first_int("numa_node=3"), Some(3));
+        assert_eq!(parse_first_int("no numbers"), None);
+        assert_eq!(parse_first_int("abc 42 def"), Some(42));
+        assert_eq!(parse_first_int(""), None);
     }
 }

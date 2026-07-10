@@ -519,4 +519,48 @@ mod tests {
         let strategy = AllocStrategy::AscendHostAlloc;
         assert_eq!(format!("{:?}", strategy), "AscendHostAlloc");
     }
+
+    #[cfg(feature = "ascend")]
+    #[test]
+    fn test_allocate_ascend_host_alignment() {
+        use crate::device::ascend;
+        // Skip if no Ascend device available.
+        if ascend::ensure_acl_initialized().is_err() {
+            eprintln!("SKIP: cannot init ACL runtime");
+            return;
+        }
+        let device = match ascend::AscendDevice::new(0) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("SKIP: cannot create Ascend device 0: {e}");
+                return;
+            }
+        };
+        if device.set_current().is_err() {
+            eprintln!("SKIP: cannot set device 0");
+            return;
+        }
+        drop(device);
+
+        // Test that allocate_ascend_host returns 64-byte aligned pointers
+        // across multiple size classes.
+        let sizes: &[usize] = &[1, 63, 64, 65, 127, 128, 1024, 4096, 65536];
+        for &size in sizes {
+            let mem = PinnedMemory::allocate_ascend_host(size)
+                .unwrap_or_else(|e| panic!("allocate_ascend_host({size}) failed: {e}"));
+            let addr = mem.as_ptr() as usize;
+            assert!(
+                addr % 64 == 0,
+                "allocate_ascend_host({size}) ptr={addr:#x} not 64-byte aligned (remainder={})",
+                addr % 64
+            );
+        }
+    }
+
+    #[cfg(feature = "ascend")]
+    #[test]
+    fn test_allocate_ascend_host_zero_fails() {
+        let result = PinnedMemory::allocate_ascend_host(0);
+        assert!(matches!(result, Err(PinnedMemError::ZeroSize)));
+    }
 }
