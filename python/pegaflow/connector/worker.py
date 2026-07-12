@@ -650,7 +650,6 @@ class WorkerConnector:
 
     def save_kv_layer(
         self,
-        metadata: PegaConnectorMetadata,
         layer_name: str,
         kv_layer: "torch.Tensor",
         attn_metadata: "AttentionMetadata",
@@ -670,14 +669,16 @@ class WorkerConnector:
         # is patched to call both save_kv_layer and wait_for_save.
         if not getattr(self, "_save_fallback_used", False):
             self._save_fallback_used = True
-            if debug_save_enabled():
-                logger.info(
-                    "[PegaKVConnector.DEBUG] save_kv_layer fallback triggered: "
-                    "layer=%s — wait_for_save() may not be called by Ascend backend",
-                    layer_name,
-                )
-            self.wait_for_save()
-        self._save_fallback_used = False
+            try:
+                if debug_save_enabled():
+                    logger.info(
+                        "[PegaKVConnector.DEBUG] save_kv_layer fallback triggered: "
+                        "layer=%s — wait_for_save() may not be called by Ascend backend",
+                        layer_name,
+                    )
+                self.wait_for_save()
+            finally:
+                self._save_fallback_used = False
 
     def wait_for_save(self) -> None:
         metadata = self._current_metadata

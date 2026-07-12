@@ -207,10 +207,13 @@ class PegaKVConnector(KVConnectorBase_V1):
         attn_metadata,
         **kwargs: Any,
     ) -> None:
-        # Save is submitted from wait_for_save() using scheduler metadata.
-        # Layer callbacks are intentionally ignored so graph replay
-        # cannot suppress save submission.
-        pass
+        # Primary save path: vLLM calls wait_for_save() after the forward pass.
+        # Ascend attention backends may not call wait_for_save(), so delegate
+        # to the worker's per-layer callback which includes a fallback that
+        # triggers on the first registered layer.
+        if not self._worker:
+            return
+        self._worker.save_kv_layer(layer_name, kv_layer, attn_metadata)
 
     def wait_for_save(self) -> None:
         if not self._worker:

@@ -67,6 +67,10 @@ class ConnectorContext:
         return self.mode is PegaConnectorMode.READ_WRITE
 
     @property
+    def write_enabled(self) -> bool:
+        return self.mode in (PegaConnectorMode.READ_WRITE, PegaConnectorMode.SAVE_ONLY)
+
+    @property
     def virtual_block_size(self) -> int:
         """Block size as seen by the scheduler.
 

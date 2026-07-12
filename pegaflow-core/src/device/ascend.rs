@@ -282,12 +282,34 @@ pub fn free_host(ptr: *mut u8) -> Result<(), String> {
 // Ascend Memcpy (H2D / D2H)
 // ---------------------------------------------------------------------------
 
+/// Human-readable description for common CANN ACL error codes.
+fn acl_error_description(code: i32) -> &'static str {
+    match code {
+        507899 => "memory not allocated via aclrtMallocPhysical (expandable_segments is not DMA-capable — use camem_allocator)",
+        207001 => "invalid parameter",
+        207002 => "memory allocation failed",
+        207003 => "device not available",
+        207004 => "stream is invalid",
+        _ => "see CANN documentation for error code details",
+    }
+}
+
+/// Error code returned when source/destination memory was allocated by the
+/// default ``torch_npu`` ``expandable_segments`` allocator instead of
+/// ``aclrtMallocPhysical``. Neither async nor synchronous ``aclrtMemcpy*`` can
+/// touch this memory; the synchronous path may **crash the process**.
+const ACL_ERROR_DMA_NOT_SUPPORTED: i32 = 507899;
+
 /// Enqueue a host-to-device copy on the given stream.
 ///
-/// Falls back to synchronous `aclrtMemcpy` when `aclrtMemcpyAsync` fails with
-/// DMA-incompatible source/destination memory (e.g. `expandable_segments`
-/// allocator buffers on Ascend NPU). After the synchronous copy the stream is
-/// synchronized so that ordering with surrounding async work is preserved.
+/// **Ascend expandable_segments limitation**: when the source or destination
+/// memory was allocated by the default ``torch_npu`` allocator (which uses
+/// ``expandable_segments``, not ``aclrtMallocPhysical``), ``aclrtMemcpyAsync``
+/// fails with error **507899**.  The synchronous fallback is **NOT** attempted
+/// for this error because ``aclrtMemcpy`` may segfault on non-DMA memory.
+///
+/// For save/load to work, enable ``camem_allocator`` (``aclrtMallocPhysical``)
+/// via ``COMPILE_CUSTOM_KERNELS=1`` and ensure ``vllm_ascend_C`` is built.
 pub fn memcpy_h2d_async(
     dst_device: u64,
     src_host: *const u8,
@@ -308,10 +330,24 @@ pub fn memcpy_h2d_async(
     if ret == ACL_ERROR_NONE {
         return Ok(());
     }
-    // Async path failed — likely `expandable_segments` memory that does not
-    // support DMA. Fall back to synchronous copy and barrier the stream.
+
+    let desc = acl_error_description(ret);
+    // Error 507899: expandable_segments memory — synchronous fallback will
+    // crash the process inside the Ascend driver. Return the error cleanly
+    // so the caller can log and continue.
+    if ret == ACL_ERROR_DMA_NOT_SUPPORTED {
+        return Err(format!(
+            "aclrtMemcpyAsync(H2D) failed: error {ret} ({desc}), size={size}. \
+             This memory was not allocated via aclrtMallocPhysical. \
+             Enable camem_allocator (COMPILE_CUSTOM_KERNELS=1) or use \
+             vllm_ascend_C for DMA-capable KV cache allocations."
+        ));
+    }
+
+    // For other errors, try the synchronous fallback.
     log::warn!(
-        "aclrtMemcpyAsync(H2D) failed: error code {ret}, size={size} — falling back to synchronous aclrtMemcpy"
+        "aclrtMemcpyAsync(H2D) failed: error {ret} ({desc}), size={size} — \
+         falling back to synchronous aclrtMemcpy"
     );
     let ret = unsafe {
         aclrtMemcpy(
@@ -323,22 +359,27 @@ pub fn memcpy_h2d_async(
         )
     };
     if ret != ACL_ERROR_NONE {
+        let desc = acl_error_description(ret);
         return Err(format!(
-            "aclrtMemcpyAsync(H2D) fallback also failed: error code {ret}, size={size}"
+            "aclrtMemcpyAsync(H2D) and synchronous fallback both failed: \
+             error {ret} ({desc}), size={size}."
         ));
     }
-    // Synchronize the stream so that work enqueued after this call does not
-    // race with the synchronous copy.
     stream.synchronize()?;
+    log::debug!("aclrtMemcpy(H2D sync fallback) succeeded: size={size}");
     Ok(())
 }
 
 /// Enqueue a device-to-host copy on the given stream.
 ///
-/// Falls back to synchronous `aclrtMemcpy` when `aclrtMemcpyAsync` fails with
-/// DMA-incompatible source/destination memory (e.g. `expandable_segments`
-/// allocator buffers on Ascend NPU). After the synchronous copy the stream is
-/// synchronized so that ordering with surrounding async work is preserved.
+/// **Ascend expandable_segments limitation**: when the source or destination
+/// memory was allocated by the default ``torch_npu`` allocator (which uses
+/// ``expandable_segments``, not ``aclrtMallocPhysical``), ``aclrtMemcpyAsync``
+/// fails with error **507899**.  The synchronous fallback is **NOT** attempted
+/// for this error because ``aclrtMemcpy`` may segfault on non-DMA memory.
+///
+/// For save/load to work, enable ``camem_allocator`` (``aclrtMallocPhysical``)
+/// via ``COMPILE_CUSTOM_KERNELS=1`` and ensure ``vllm_ascend_C`` is built.
 pub fn memcpy_d2h_async(
     dst_host: *mut u8,
     src_device: u64,
@@ -359,10 +400,24 @@ pub fn memcpy_d2h_async(
     if ret == ACL_ERROR_NONE {
         return Ok(());
     }
-    // Async path failed — likely `expandable_segments` memory that does not
-    // support DMA. Fall back to synchronous copy and barrier the stream.
+
+    let desc = acl_error_description(ret);
+    // Error 507899: expandable_segments memory — synchronous fallback will
+    // crash the process inside the Ascend driver. Return the error cleanly
+    // so the caller can log and continue.
+    if ret == ACL_ERROR_DMA_NOT_SUPPORTED {
+        return Err(format!(
+            "aclrtMemcpyAsync(D2H) failed: error {ret} ({desc}), size={size}. \
+             This memory was not allocated via aclrtMallocPhysical. \
+             Enable camem_allocator (COMPILE_CUSTOM_KERNELS=1) or use \
+             vllm_ascend_C for DMA-capable KV cache allocations."
+        ));
+    }
+
+    // For other errors, try the synchronous fallback.
     log::warn!(
-        "aclrtMemcpyAsync(D2H) failed: error code {ret}, size={size} — falling back to synchronous aclrtMemcpy"
+        "aclrtMemcpyAsync(D2H) failed: error {ret} ({desc}), size={size} — \
+         falling back to synchronous aclrtMemcpy"
     );
     let ret = unsafe {
         aclrtMemcpy(
@@ -374,13 +429,14 @@ pub fn memcpy_d2h_async(
         )
     };
     if ret != ACL_ERROR_NONE {
+        let desc = acl_error_description(ret);
         return Err(format!(
-            "aclrtMemcpyAsync(D2H) fallback also failed: error code {ret}, size={size}"
+            "aclrtMemcpyAsync(D2H) and synchronous fallback both failed: \
+             error {ret} ({desc}), size={size}."
         ));
     }
-    // Synchronize the stream so that work enqueued after this call does not
-    // race with the synchronous copy.
     stream.synchronize()?;
+    log::debug!("aclrtMemcpy(D2H sync fallback) succeeded: size={size}");
     Ok(())
 }
 
