@@ -56,6 +56,11 @@ message SaveLayer {
   string layer_name = 1;
   repeated uint32 block_ids = 2;
   repeated bytes block_hashes = 3;
+  // Pre-copied CPU block data (one per block_id).
+  // When non-empty, the server stores this directly instead of performing
+  // D2H via aclrtMemcpyAsync.  Each entry is the raw KV-cache bytes for the
+  // corresponding block in `block_ids` (same order / same length).
+  repeated bytes block_data = 4;
 }
 
 message SaveRequest {
@@ -84,8 +89,19 @@ message LeaseLoad {
   repeated uint32 block_ids = 2;
 }
 
+// One layer's worth of loaded block data (Plan 3 Ascend H2D bypass).
+message LoadedLayer {
+  string layer_name = 1;
+  // CPU block data, one entry per block (same order as block_ids in request).
+  repeated bytes block_data = 2;
+}
+
 message LoadResponse {
   ResponseStatus status = 1;
+  // Pre-copied CPU block data from server storage (Plan 3 Ascend H2D).
+  // When non-empty, the connector copies this into NPU tensors via
+  // tensor.copy_() instead of relying on server-side aclrtMemcpyAsync(H2D).
+  repeated LoadedLayer layers = 2;
 }
 
 message QueryRequest {

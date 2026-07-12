@@ -338,7 +338,10 @@ impl EngineRpcClient {
     ///     tp_rank: Tensor parallel rank
     ///     pp_rank: Pipeline parallel rank
     ///     device_id: device ID
-    ///     saves: List of (layer_name, block_ids, block_hashes) tuples
+    ///     saves: List of (layer_name, block_ids, block_hashes, block_data) tuples.
+    ///            block_data is optional; when provided (non-empty), the server
+    ///            stores the pre-copied CPU bytes directly instead of performing
+    ///            D2H via aclrtMemcpyAsync.
     ///
     /// Returns: (ok: bool, message: str)
     #[pyo3(signature = (instance_id, tp_rank, pp_rank, device_id, saves))]
@@ -349,14 +352,15 @@ impl EngineRpcClient {
         tp_rank: u32,
         pp_rank: u32,
         device_id: i32,
-        saves: Vec<(String, Vec<u32>, Vec<Vec<u8>>)>,
+        saves: Vec<(String, Vec<u32>, Vec<Vec<u8>>, Vec<Vec<u8>>)>,
     ) -> PyResult<(bool, String)> {
         let saves = saves
             .into_iter()
-            .map(|(layer_name, block_ids, block_hashes)| SaveLayer {
+            .map(|(layer_name, block_ids, block_hashes, block_data)| SaveLayer {
                 layer_name,
                 block_ids,
                 block_hashes,
+                block_data,
             })
             .collect();
         self.call(py, "save", |mut c| async move {
@@ -403,12 +407,12 @@ impl EngineRpcClient {
         load_state_shm: String,
         layer_names: Vec<String>,
         loads: Vec<(Vec<u8>, Vec<u32>)>,
-    ) -> PyResult<(bool, String)> {
+    ) -> PyResult<(bool, String, Vec<(String, Vec<Vec<u8>>)>)> {
         let loads = loads
             .into_iter()
             .map(|(lease, block_ids)| LeaseLoad { lease, block_ids })
             .collect();
-        self.call(py, "load", |mut c| async move {
+        let resp = self.call(py, "load", |mut c| async move {
             let resp = c
                 .load(LoadRequest {
                     instance_id,
@@ -420,8 +424,14 @@ impl EngineRpcClient {
                 })
                 .await?;
             Ok(resp.into_inner())
-        })
-        .and_then(|r| status_tuple("load", r.status))
+        })?;
+        let (ok, message) = status_tuple("load", resp.status.clone())?;
+        let layers: Vec<(String, Vec<Vec<u8>>)> = resp
+            .layers
+            .into_iter()
+            .map(|l| (l.layer_name, l.block_data))
+            .collect();
+        Ok((ok, message, layers))
     }
 
     /// Query prefix cache hits with SSD prefetch support.

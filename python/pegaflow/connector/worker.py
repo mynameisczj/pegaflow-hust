@@ -241,6 +241,14 @@ class WorkerConnector:
             "device id is unknown; cannot register KV caches"
         )
 
+        # Store tensor references for Plan 3 D2H (Python-side tensor.to('cpu')).
+        # On Ascend NPU, aclrtMemcpyAsync fails on expandable_segments-allocated
+        # KV cache tensors (error 507899), but PyTorch's internal tensor.to('cpu')
+        # path successfully performs D2H.  We cache the tensors here so that
+        # _process_save_batch can copy block data to CPU before calling the save
+        # RPC, bypassing the server-side aclrtMemcpyAsync entirely.
+        self._kv_cache_tensors: dict[str, torch.Tensor] = kv_caches
+
         if self._use_mla_layer_split_registration:
             kv_cache_tensors = getattr(self._kv_cache_config, "kv_cache_tensors", None)
             if not kv_cache_tensors:
@@ -541,7 +549,7 @@ class WorkerConnector:
         shm_name = load_state.shm_name()
 
         try:
-            ok, message = self._ctx.engine_client.load(
+            ok, message, loaded_layers = self._ctx.engine_client.load(
                 self._ctx.instance_id,
                 self._ctx.effective_tp_rank,
                 self._ctx.device_id,
@@ -561,6 +569,33 @@ class WorkerConnector:
             self._record_load_failure(request_ids, all_block_ids, load_start)
             self._ctx.state_manager.mark_unavailable(f"load rpc exception: {e}")
             return
+
+        # Plan 3 (Ascend H2D): if the server returned pre-copied CPU data,
+        # copy it directly into the NPU KV cache tensors via tensor.copy_().
+        # This bypasses server-side aclrtMemcpyAsync(H2D) which fails with
+        # error 507899 on expandable_segments-allocated memory.
+        if loaded_layers:
+            kv_tensors = getattr(self, '_kv_cache_tensors', None) or {}
+            for layer_name, block_data_list in loaded_layers:
+                actual_tensor = kv_tensors.get(layer_name)
+                if actual_tensor is None:
+                    continue
+                if isinstance(actual_tensor, tuple):
+                    # Map K/V suffix to tuple index
+                    if layer_name.endswith('_k'):
+                        actual_tensor = actual_tensor[0]
+                    elif layer_name.endswith('_v'):
+                        actual_tensor = actual_tensor[1]
+                    else:
+                        actual_tensor = actual_tensor[0]
+                for i, blk_id in enumerate(load_intent.block_ids if len(loaded_layers) == 1 else all_block_ids):
+                    if i < len(block_data_list) and block_data_list[i]:
+                        cpu_block = torch.frombuffer(
+                            bytearray(block_data_list[i]),
+                            dtype=actual_tensor.dtype,
+                        ).reshape(actual_tensor[blk_id].shape)
+                        actual_tensor[blk_id].copy_(cpu_block.to(device=actual_tensor.device, non_blocking=True))
+            _device_synchronize(self._torch_device)
 
         if not ok:
             logger.error(
@@ -788,13 +823,67 @@ class WorkerConnector:
             # Otherwise we may copy uninitialized memory (attention kernel is async)
             _device_synchronize(self._torch_device)
 
-            saves_list = [(name, ids, hashes) for name, (ids, hashes) in saves_by_layer.items()]
-            total_blocks = sum(len(ids) for _, ids, _ in saves_list)
+            # Plan 3: Python-side D2H via tensor.to('cpu').
+            # On Ascend NPU, aclrtMemcpyAsync(D2H) fails with error 507899 on
+            # expandable_segments-allocated tensors.  PyTorch's internal
+            # tensor.to('cpu') path succeeds where the raw CANN API does not.
+            # We copy block data to CPU here and send it inline with the save
+            # RPC so the server never calls aclrtMemcpyAsync.
+            kv_tensors = getattr(self, '_kv_cache_tensors', None) or {}
+            saves_list: list[tuple[str, list[int], list[bytes], list[bytes]]] = []
+            total_blocks = 0
+            for layer_name, (block_ids, block_hashes) in saves_by_layer.items():
+                # Map save layer names (attn_k / attn_v) to tensor keys (attn).
+                # The KV cache is stored as one combined tensor per attention
+                # layer, but the save flow references K and V separately.
+                tensor_key = layer_name
+                layer_tensor = kv_tensors.get(tensor_key)
+                if layer_tensor is None and tensor_key.endswith('_k'):
+                    tensor_key = tensor_key[:-2]  # strip _k
+                    layer_tensor = kv_tensors.get(tensor_key)
+                if layer_tensor is None and tensor_key.endswith('_v'):
+                    tensor_key = tensor_key[:-2]  # strip _v
+                    layer_tensor = kv_tensors.get(tensor_key)
+                block_data_list: list[bytes] = []
+                if layer_tensor is not None and block_ids:
+                    # Tuple KV cache (k_tensor, v_tensor) — map _k/_v suffix.
+                    if isinstance(layer_tensor, tuple):
+                        if layer_name.endswith('_k'):
+                            actual_tensor = layer_tensor[0]
+                        elif layer_name.endswith('_v'):
+                            actual_tensor = layer_tensor[1]
+                        else:
+                            actual_tensor = layer_tensor[0]
+                    else:
+                        actual_tensor = layer_tensor
+                    try:
+                        for blk_id in block_ids:
+                            block_view = actual_tensor[blk_id].contiguous()
+                            cpu_block = block_view.to('cpu', non_blocking=True)
+                            cpu_block = cpu_block.contiguous()
+                            # Convert to raw bytes.  We must synchronize first
+                            # if using non_blocking copy.
+                            _device_synchronize(self._torch_device)
+                            block_data_list.append(
+                                cpu_block.view(torch.uint8).numpy().tobytes()
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "[PegaKVConnector] Plan-3 D2H failed for layer=%s: %s. "
+                            "Falling back to device-pointer save.",
+                            layer_name, e,
+                        )
+                        block_data_list = []
+
+                saves_list.append((layer_name, block_ids, block_hashes, block_data_list))
+                total_blocks += len(block_ids)
 
             if debug_save_enabled():
+                d2h_blocks = sum(1 for (_, _, _, bd) in saves_list if bd)
                 logger.info(
-                    "[PegaKVConnector.DEBUG] _process_save_batch: layers=%d total_blocks=%d reqs=%s",
-                    len(saves_list), total_blocks, all_request_ids,
+                    "[PegaKVConnector.DEBUG] _process_save_batch: layers=%d total_blocks=%d "
+                    "d2h_blocks=%d reqs=%s",
+                    len(saves_list), total_blocks, d2h_blocks, all_request_ids,
                 )
 
             save_start = time.perf_counter()

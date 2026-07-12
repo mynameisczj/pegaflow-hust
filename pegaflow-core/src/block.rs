@@ -19,10 +19,14 @@ pub use pegaflow_common::BlockKey;
 pub type BlockHash = Vec<u8>;
 
 /// Per-layer save input: layer name + block IDs + content hashes.
+/// When `block_data` is non-empty, it contains pre-copied CPU bytes
+/// (one entry per block, same order as `block_ids`) and the engine
+/// stores them directly — no D2H is performed.
 pub struct LayerSave {
     pub layer_name: String,
     pub block_ids: Vec<usize>,
     pub block_hashes: Vec<Vec<u8>>,
+    pub block_data: Vec<Vec<u8>>,
 }
 
 // ============================================================================
