@@ -11,7 +11,7 @@ default = ["cuda-12", "rdma"]
 cuda = ["dep:cudarc"]
 cuda-12 = ["cuda", "cudarc/cuda-12080", "cudarc/nvrtc", "pegaflow-transfer?/cuda-12"]
 cuda-13 = ["cuda", "cudarc/cuda-13000", "cudarc/nvrtc", "pegaflow-transfer?/cuda-13"]
-ascend = []
+ascend = ["pegaflow-transfer?/ascend"]
 rdma = ["dep:pegaflow-transfer"]
 tracing = ["fastrace"]
 
