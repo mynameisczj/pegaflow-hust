@@ -19,6 +19,7 @@ from pegaflow.connector.common import (
     logger,
     parse_env_int,
 )
+from pegaflow.debug_save import debug_save_enabled
 from pegaflow.ipc_wrapper import CudaIPCWrapper
 from pegaflow.npu_ipc_wrapper import NpuIPCWrapper
 from pegaflow.pegaflow import PyLoadState
@@ -655,17 +656,50 @@ class WorkerConnector:
         attn_metadata: "AttentionMetadata",
         **kwargs: Any,
     ) -> None:
-        # Save is metadata-driven and submitted from wait_for_save() outside
-        # layer callbacks so graph replay cannot suppress it.
-        pass
+        # Save is normally metadata-driven and submitted from wait_for_save()
+        # outside layer callbacks so graph replay cannot suppress it.
+        # However, Ascend attention backends may not call wait_for_save(), so
+        # provide a fallback path through the layer callback on first layer.
+        if not self._registered_layers:
+            return
+        first_layer = self._registered_layers[0]
+        if layer_name != first_layer:
+            return
+        # Delegate to wait_for_save so all save logic stays in one place.
+        # Guard with a flag to avoid double-submission when an Ascend backend
+        # is patched to call both save_kv_layer and wait_for_save.
+        if not getattr(self, "_save_fallback_used", False):
+            self._save_fallback_used = True
+            if debug_save_enabled():
+                logger.info(
+                    "[PegaKVConnector.DEBUG] save_kv_layer fallback triggered: "
+                    "layer=%s — wait_for_save() may not be called by Ascend backend",
+                    layer_name,
+                )
+            self.wait_for_save()
+        self._save_fallback_used = False
 
     def wait_for_save(self) -> None:
         metadata = self._current_metadata
         self._current_metadata = None
+        if debug_save_enabled():
+            logger.info("[PegaKVConnector.DEBUG] wait_for_save called: metadata=%s", metadata)
         if metadata is None or not metadata.save_intents:
+            if debug_save_enabled():
+                logger.info(
+                    "[PegaKVConnector.DEBUG] wait_for_save skipped: metadata=%s, save_intents=%s",
+                    metadata is not None,
+                    metadata.save_intents if metadata else "N/A",
+                )
             return
 
         request_ids = list(metadata.save_intents.keys())
+        if debug_save_enabled():
+            for req_id, intent in metadata.save_intents.items():
+                logger.info(
+                    "[PegaKVConnector.DEBUG] wait_for_save save_intent: req=%s block_ids=%s hashes=%d",
+                    req_id, intent.block_ids, len(intent.block_hashes),
+                )
 
         with self._save_completion_lock:
             for req_id in request_ids:
@@ -755,6 +789,12 @@ class WorkerConnector:
 
             saves_list = [(name, ids, hashes) for name, (ids, hashes) in saves_by_layer.items()]
             total_blocks = sum(len(ids) for _, ids, _ in saves_list)
+
+            if debug_save_enabled():
+                logger.info(
+                    "[PegaKVConnector.DEBUG] _process_save_batch: layers=%d total_blocks=%d reqs=%s",
+                    len(saves_list), total_blocks, all_request_ids,
+                )
 
             save_start = time.perf_counter()
             success = False
@@ -937,8 +977,10 @@ def _resolve_ipc_wrapper_factory(device: torch.device):
     )
 
 
-def _device_synchronize(device: torch.device) -> None:
+def _device_synchronize(device):  # type: ignore[type-arg]
     """Synchronize the current stream on the given device."""
+    if device is None:
+        return
     if device.type == "cuda":
         torch.cuda.synchronize(device)
     elif device.type == "npu":

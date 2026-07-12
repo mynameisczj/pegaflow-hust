@@ -16,6 +16,7 @@ from pegaflow.connector.common import (
     logger,
 )
 from pegaflow.connector.connector_metrics import PrefetchTracker
+from pegaflow.debug_save import debug_save_enabled
 from pegaflow.pegaflow import QueryLoading, QueryReady
 
 if TYPE_CHECKING:
@@ -425,6 +426,22 @@ class SchedulerConnector:
         saveable_block_idx = min(len(block_hashes), base_block_idx + local_saveable)
         new_blocks = saveable_block_idx - start_block_idx
         if new_blocks <= 0:
+            if debug_save_enabled():
+                logger.info(
+                    "[PegaKVConnector.DEBUG] req=%s _consume_save_intent skipped: "
+                    "scheduled=%d virtual_block_size=%d allocated=%d "
+                    "saveable_block_idx=%d start_block_idx=%d new_blocks=%d "
+                    "base_block_idx=%d total_hashes=%d",
+                    req_id,
+                    scheduled,
+                    self._ctx.virtual_block_size,
+                    len(allocated),
+                    saveable_block_idx,
+                    start_block_idx,
+                    new_blocks,
+                    base_block_idx,
+                    len(block_hashes),
+                )
             return None
 
         self._next_stored_block_idx[req_id] = saveable_block_idx

@@ -283,6 +283,11 @@ pub fn free_host(ptr: *mut u8) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 
 /// Enqueue a host-to-device copy on the given stream.
+///
+/// Falls back to synchronous `aclrtMemcpy` when `aclrtMemcpyAsync` fails with
+/// DMA-incompatible source/destination memory (e.g. `expandable_segments`
+/// allocator buffers on Ascend NPU). After the synchronous copy the stream is
+/// synchronized so that ordering with surrounding async work is preserved.
 pub fn memcpy_h2d_async(
     dst_device: u64,
     src_host: *const u8,
@@ -300,15 +305,40 @@ pub fn memcpy_h2d_async(
             stream.stream,
         )
     };
+    if ret == ACL_ERROR_NONE {
+        return Ok(());
+    }
+    // Async path failed — likely `expandable_segments` memory that does not
+    // support DMA. Fall back to synchronous copy and barrier the stream.
+    log::warn!(
+        "aclrtMemcpyAsync(H2D) failed: error code {ret}, size={size} — falling back to synchronous aclrtMemcpy"
+    );
+    let ret = unsafe {
+        aclrtMemcpy(
+            dst_device as *mut c_void,
+            size,
+            src_host as *const c_void,
+            size,
+            ACL_MEMCPY_HOST_TO_DEVICE,
+        )
+    };
     if ret != ACL_ERROR_NONE {
         return Err(format!(
-            "aclrtMemcpyAsync(H2D) failed: error code {ret}, size={size}"
+            "aclrtMemcpyAsync(H2D) fallback also failed: error code {ret}, size={size}"
         ));
     }
+    // Synchronize the stream so that work enqueued after this call does not
+    // race with the synchronous copy.
+    stream.synchronize()?;
     Ok(())
 }
 
 /// Enqueue a device-to-host copy on the given stream.
+///
+/// Falls back to synchronous `aclrtMemcpy` when `aclrtMemcpyAsync` fails with
+/// DMA-incompatible source/destination memory (e.g. `expandable_segments`
+/// allocator buffers on Ascend NPU). After the synchronous copy the stream is
+/// synchronized so that ordering with surrounding async work is preserved.
 pub fn memcpy_d2h_async(
     dst_host: *mut u8,
     src_device: u64,
@@ -326,11 +356,31 @@ pub fn memcpy_d2h_async(
             stream.stream,
         )
     };
+    if ret == ACL_ERROR_NONE {
+        return Ok(());
+    }
+    // Async path failed — likely `expandable_segments` memory that does not
+    // support DMA. Fall back to synchronous copy and barrier the stream.
+    log::warn!(
+        "aclrtMemcpyAsync(D2H) failed: error code {ret}, size={size} — falling back to synchronous aclrtMemcpy"
+    );
+    let ret = unsafe {
+        aclrtMemcpy(
+            dst_host as *mut c_void,
+            size,
+            src_device as *const c_void,
+            size,
+            ACL_MEMCPY_DEVICE_TO_HOST,
+        )
+    };
     if ret != ACL_ERROR_NONE {
         return Err(format!(
-            "aclrtMemcpyAsync(D2H) failed: error code {ret}, size={size}"
+            "aclrtMemcpyAsync(D2H) fallback also failed: error code {ret}, size={size}"
         ));
     }
+    // Synchronize the stream so that work enqueued after this call does not
+    // race with the synchronous copy.
+    stream.synchronize()?;
     Ok(())
 }
 
