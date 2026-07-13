@@ -21,6 +21,7 @@ from pegaflow.connector.common import (
 )
 from pegaflow.debug_save import debug_save_enabled
 from pegaflow.ipc_wrapper import CudaIPCWrapper
+from pegaflow.npu_ipc_wrapper import NpuIPCWrapper
 from pegaflow.pegaflow import PyLoadState
 
 if TYPE_CHECKING:
@@ -268,6 +269,17 @@ class WorkerConnector:
         if not kv_caches:
             raise RuntimeError("No KV cache layers were selected for registration")
 
+        # Ascend prefill-disaggregation returns KV caches as (k, v) tuples.
+        # Flatten to per-tensor dict: {layer_k: k, layer_v: v}
+        flat_kv_caches: dict[str, torch.Tensor] = {}
+        for layer_name, kv_cache in kv_caches.items():
+            if isinstance(kv_cache, tuple):
+                for idx, t in enumerate(kv_cache):
+                    flat_kv_caches[f"{layer_name}_{'k' if idx == 0 else 'v'}"] = t
+            else:
+                flat_kv_caches[layer_name] = kv_cache
+        kv_caches = flat_kv_caches
+
         self._registered_layers = list(kv_caches.keys())
         self._page_first = self._use_page_first()
         self._torch_device = next(iter(kv_caches.values())).device
@@ -284,11 +296,10 @@ class WorkerConnector:
         split_blocks_per_logical = 1
         split_logical_blocks = 0
 
+        self._ipc_wrapper_factory = _resolve_ipc_wrapper_factory(self._torch_device)
+
         for layer_name, kv_cache in kv_caches.items():
-            assert kv_cache.storage_offset() == 0, (
-                f"KV cache for {layer_name} must have zero storage offset"
-            )
-            wrapper = CudaIPCWrapper(kv_cache)
+            wrapper = self._ipc_wrapper_factory(kv_cache)
             wrapper_bytes = pickle.dumps(wrapper)
 
             registration = _infer_kv_cache_registration(
@@ -947,6 +958,18 @@ class WorkerConnector:
 # ---------------------------------------------------------------------------
 # Device-aware helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolve_ipc_wrapper_factory(device: torch.device):
+    """Return the appropriate IPC wrapper class for the given device."""
+    if device.type == "cuda":
+        return lambda tensor: CudaIPCWrapper(tensor)
+    if device.type == "npu":
+        return lambda tensor: NpuIPCWrapper(tensor)
+    raise RuntimeError(
+        f"Unsupported device type '{device.type}'. "
+        "PegaFlow requires CUDA or Ascend NPU."
+    )
 
 
 def _device_synchronize(device):  # type: ignore[type-arg]
