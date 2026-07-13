@@ -449,6 +449,11 @@ pub fn memcpy_d2h_async(
 /// `policy` is the ACL memory policy (typically 0 for default).
 pub fn malloc_device(size: usize, policy: i32) -> Result<u64, String> {
     ensure_acl_initialized()?;
+    // aclrtMalloc requires an active device context
+    let ret = unsafe { aclrtSetDevice(0) };
+    if ret != ACL_ERROR_NONE {
+        return Err(format!("aclrtSetDevice(0) before malloc_device({size}) failed: error code {ret}"));
+    }
     if size == 0 {
         return Err("aclrtMalloc: size must be > 0".into());
     }
@@ -476,6 +481,10 @@ pub fn free_device(ptr: u64) -> Result<(), String> {
 /// Synchronous host-to-device memory copy (blocking, no stream needed).
 pub fn memcpy_h2d_sync(dst_device: u64, src_host: *const u8, size: usize) -> Result<(), String> {
     ensure_acl_initialized()?;
+    let ret = unsafe { aclrtSetDevice(0) };
+    if ret != ACL_ERROR_NONE {
+        return Err(format!("aclrtSetDevice(0) before memcpy_h2d_sync failed: error code {ret}"));
+    }
     let ret = unsafe {
         aclrtMemcpy(
             dst_device as *mut c_void,
