@@ -603,65 +603,6 @@ impl PegaEngine {
         Ok(rx)
     }
 
-    /// Read CPU block data for the given query leases and layers (Plan 3 Ascend).
-    ///
-    /// Returns per-layer lists of raw bytes suitable for inclusion in a
-    /// `LoadResponse`.  When `layer_names` is empty the first layer's slot
-    /// is used for all leases (page-first mode); otherwise one entry per
-    /// layer name is returned.
-    pub fn read_block_data_for_leases(
-        &self,
-        instance_id: &str,
-        tp_rank: usize,
-        layer_names: &[&str],
-        loads: &[(QueryLeaseId, Vec<usize>)],
-    ) -> Result<Vec<(String, Vec<Vec<u8>>)>, EngineError> {
-        let instance = self.get_instance(instance_id)?;
-        let topology = instance.sealed_topology()?;
-
-        let mut result: Vec<(String, Vec<Vec<u8>>)> = Vec::new();
-
-        for (lease, block_ids) in loads {
-            let blocks = self
-                .query_leases
-                .consume(instance_id, lease)
-                .map_err(EngineError::Storage)?;
-
-            for layer_name in layer_names {
-                let layer_id = topology.layer_id(layer_name)?;
-                let slot_id = topology.slot_index(layer_id, tp_rank)?;
-                let host_offset = topology
-                    .page_placement(layer_id)
-                    .map_or(0, |(offset, _)| offset);
-
-                let mut layer_data: Vec<Vec<u8>> = Vec::with_capacity(block_ids.len());
-                for block in &blocks {
-                    let slot = block.get_slot(slot_id).ok_or_else(|| {
-                        EngineError::InvalidArgument(format!(
-                            "block missing slot {slot_id} for layer {layer_name}"
-                        ))
-                    })?;
-                    let seg_ptr = slot.segment_ptr(0).ok_or_else(|| {
-                        EngineError::InvalidArgument(format!(
-                            "block has no segment 0 for layer {layer_name}"
-                        ))
-                    })?;
-                    let seg_size = slot.segment_size(0).unwrap_or(0);
-                    let src = unsafe { seg_ptr.as_ptr().add(host_offset) };
-                    let size = seg_size - host_offset;
-                    let mut data = vec![0u8; size];
-                    unsafe {
-                        std::ptr::copy_nonoverlapping(src, data.as_mut_ptr(), size);
-                    }
-                    layer_data.push(data);
-                }
-                result.push(((*layer_name).to_string(), layer_data));
-            }
-        }
-
-        Ok(result)
-    }
-
     #[allow(
         clippy::too_many_arguments,
         reason = "internal helper keeps the public load API validation path explicit"
@@ -760,7 +701,6 @@ impl PegaEngine {
                     layer_name: (*layer_name).to_string(),
                     layout,
                     blocks,
-                    pre_copied: vec![],
                 });
             }
         }

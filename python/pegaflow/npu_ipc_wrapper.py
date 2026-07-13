@@ -132,7 +132,7 @@ def _npu_ipc_close_ctypes(key: bytes) -> None:
 
 _C_EXT_AVAILABLE = False
 try:
-    from npu_ipc_bindings._npu_ipc import (  # type: ignore[import-untyped]
+    from pegaflow.npu_ipc_bindings._npu_ipc import (  # type: ignore[import-untyped]
         export_key as _npu_ipc_export_key_c,
         import_key as _npu_ipc_import_key_c,
         close_key as _npu_ipc_close_key_c,
@@ -203,16 +203,13 @@ class NpuIPCWrapper:
         if ptr == 0:
             raise RuntimeError("Cannot export IPC key for a tensor with data_ptr() == 0")
 
-        # Same-host direct pointer mode: skip CANN IPC entirely.
-        # aclrtIpcMemGetExportKey succeeds for expandable_segments
-        # allocations (producing a non-empty key), but
-        # aclrtIpcMemImportByKey fails in the target process (507899)
-        # because the memory is not allocated via aclrtMallocPhysical.
-        # Since pegaflow-server and vLLM share the same NPU device,
-        # raw device pointers are sufficient — no IPC key needed.
-        self.key: bytes = b""
-        self._raw_ptr: int = ptr
-        self._raw_size: int = nbytes
+        // TODO(ascend): aclrtIpcMemGetExportKey requires device memory
+        // allocated via aclrtMallocPhysical (camem_allocator).  When
+        // camem_allocator is ready (see §7.2 方案 A/B), this will produce
+        // a valid IPC key that can be imported by the pegaflow-server.
+        // Until then, this call succeeds but the key cannot be imported
+        // (aclrtIpcMemImportByKey → 507899).
+        self.key: bytes = _npu_ipc_export_key(ptr, nbytes)
         self.dtype = tensor.dtype
         self.shape = tensor.shape
         self.stride = tensor.stride()
@@ -225,61 +222,43 @@ class NpuIPCWrapper:
         # ASCEND_VISIBLE_DEVICES environment, so the raw index is stable.
         self.device_index = tensor.device.index
 
-    def to_tensor(self) -> "torch.Tensor | _RawDeviceProxy":
-        """Return the original tensor (IPC mode) or a metadata proxy.
+    def to_tensor(self) -> torch.Tensor:
+        """Reconstruct tensor from CANN IPC key.
 
-        For IPC mode: imports via ``aclrtIpcMemImportByKey`` and returns
-        a real ``torch.Tensor``.
-
-        For raw-pointer mode: returns a ``_RawDeviceProxy`` that exposes the
-        same subset of tensor methods used by the pegaflow-server registry
-        (``data_ptr()``, ``device``, ``untyped_storage()``).
-        ``torch.Tensor.set_`` cannot accept raw ``ctypes`` buffers on
-        ``torch_npu``, and the server only reads metadata from the returned
-        object, so a full tensor reconstruction is unnecessary.
+        TODO(ascend): aclrtIpcMemImportByKey requires device memory
+        allocated via aclrtMallocPhysical (camem_allocator).  When
+        camem_allocator is ready, this will return a real torch.Tensor
+        backed by the imported NPU memory — true zero-copy cross-process
+        sharing, matching CudaIPCWrapper semantics exactly.
         """
-        raw_ptr: int = getattr(self, "_raw_ptr", 0)
-        raw_size: int = getattr(self, "_raw_size", 0)
-
-        if raw_ptr != 0:
-            return _RawDeviceProxy(
-                data_ptr=raw_ptr,
-                size_bytes=raw_size,
-                device_index=self.device_index,
-                shape=self.shape,
-                dtype=self.dtype,
-                stride=getattr(self, "stride", None),
-                storage_offset=getattr(self, "storage_offset", 0),
+        if not self.key:
+            raise RuntimeError(
+                "NpuIPCWrapper has no IPC key; "
+                "was the serialised wrapper produced by an older version?"
             )
 
-        if self.key:
-            dev_ptr = _npu_ipc_import_key(self.key)
-            if dev_ptr == 0:
-                raise RuntimeError("aclrtIpcMemImportByKey returned NULL pointer")
+        dev_ptr = _npu_ipc_import_key(self.key)
+        if dev_ptr == 0:
+            raise RuntimeError("aclrtIpcMemImportByKey returned NULL pointer")
 
-            numel = 1
-            for s in self.shape:
-                numel *= s
-            elem_size = self.dtype.itemsize
-            total_bytes = numel * elem_size
+        numel = 1
+        for s in self.shape:
+            numel *= s
+        elem_size = self.dtype.itemsize
+        total_bytes = numel * elem_size
 
-            t = torch.tensor([], device=f"npu:{self.device_index}", dtype=self.dtype)
-            storage = torch.UntypedStorage.from_buffer(
-                (ctypes.c_uint8 * total_bytes).from_address(dev_ptr),
-                byte_order="native",
-            )
-            st_offset = getattr(self, "storage_offset", 0)
-            st_stride = getattr(self, "stride", None)
-            if st_stride is None:
-                t.set_(storage, st_offset)
-                return t.view(self.shape)
-            t.set_(storage, st_offset, self.shape, st_stride)
-            return t
-
-        raise RuntimeError(
-            "NpuIPCWrapper has neither an IPC key nor a raw pointer; "
-            "was the serialised wrapper produced by an older version?"
+        t = torch.tensor([], device=f"npu:{self.device_index}", dtype=self.dtype)
+        storage = torch.UntypedStorage.from_buffer(
+            (ctypes.c_uint8 * total_bytes).from_address(dev_ptr),
+            byte_order="native",
         )
+        st_offset = getattr(self, "storage_offset", 0)
+        st_stride = getattr(self, "stride", None)
+        if st_stride is None:
+            t.set_(storage, st_offset)
+            return t.view(self.shape)
+        t.set_(storage, st_offset, self.shape, st_stride)
+        return t
 
     # ------------------------------------------------------------------
     # Pickle protocol
@@ -293,36 +272,17 @@ class NpuIPCWrapper:
             self.stride,
             self.storage_offset,
             self.device_index,
-            self._raw_ptr,
-            self._raw_size,
         )
 
     def __setstate__(self, state):
-        # Backward compatibility: older wrappers had 6-element state tuples
-        # (key, dtype, shape, stride, storage_offset, device_index).
-        # Eight elements means raw_ptr / raw_size were added.
-        if len(state) == 6:
-            (
-                self.key,
-                self.dtype,
-                self.shape,
-                self.stride,
-                self.storage_offset,
-                self.device_index,
-            ) = state
-            self._raw_ptr = 0
-            self._raw_size = 0
-        else:
-            (
-                self.key,
-                self.dtype,
-                self.shape,
-                self.stride,
-                self.storage_offset,
-                self.device_index,
-                self._raw_ptr,
-                self._raw_size,
-            ) = state
+        (
+            self.key,
+            self.dtype,
+            self.shape,
+            self.stride,
+            self.storage_offset,
+            self.device_index,
+        ) = state
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, NpuIPCWrapper):
@@ -342,79 +302,6 @@ class NpuIPCWrapper:
             f"stride={getattr(self, 'stride', None)}, "
             f"device_index={self.device_index})"
         )
-
-
-class _DeviceStub:
-    """Minimal ``torch.device``-like for the NPU device index."""
-
-    def __init__(self, index: int) -> None:
-        self.type = "npu"
-        self.index: int = index
-
-    def __repr__(self) -> str:
-        return f"npu:{self.index}"
-
-
-class _UntypedStorageStub:
-    """Minimal ``torch.UntypedStorage``-like for nbytes.
-
-    Only ``nbytes()`` is needed by the pegaflow-server registry.
-    """
-
-    def __init__(self, nbytes: int) -> None:
-        self._nbytes = nbytes
-
-    def nbytes(self) -> int:
-        return self._nbytes
-
-
-class _RawDeviceProxy:
-    """Returned by ``NpuIPCWrapper.to_tensor()`` in raw-pointer mode.
-
-    pegaflow-server's ``registry.rs`` calls three methods on the object
-    returned by ``to_tensor()``:
-
-    1. ``data_ptr()`` — raw device address
-    2. ``device`` / ``device.index`` — NPU device ordinal
-    3. ``untyped_storage()`` / ``untyped_storage().nbytes()`` — allocation size
-
-    Creating a real ``torch.Tensor`` from a raw pointer is not possible on
-    ``torch_npu`` (``set_`` rejects ``ctypes``-backed storage).  This proxy
-    provides just enough surface area for the server to read the metadata
-    it needs — no ``torch.Tensor.set_`` call is required.
-    """
-
-    def __init__(
-        self,
-        *,
-        data_ptr: int,
-        size_bytes: int,
-        device_index: int,
-        shape: tuple[int, ...],
-        dtype: torch.dtype,
-        stride: tuple[int, ...] | None = None,
-        storage_offset: int = 0,
-    ) -> None:
-        self._data_ptr = data_ptr
-        self._size_bytes = size_bytes
-        self.device = _DeviceStub(device_index)
-        self._storage = _UntypedStorageStub(size_bytes)
-        self.dtype = dtype
-        self.shape = tuple(shape)
-        self._stride = stride
-        self._storage_offset = storage_offset
-
-    def data_ptr(self) -> int:
-        return self._data_ptr
-
-    def untyped_storage(self) -> _UntypedStorageStub:
-        return self._storage
-
-    def storage_offset(self) -> int:
-        return self._storage_offset
-
-    def stride(self) -> tuple[int, ...]:
-        return self._stride if self._stride is not None else (1,)
 
 
 __all__ = ["NpuIPCWrapper"]

@@ -245,7 +245,6 @@ impl PegaEngine {
                 layer_name: ctx.layer_name.clone(),
                 layout: ctx.layout.clone(),
                 blocks: save_blocks,
-                pre_copied: vec![],
             });
         }
         Ok(())
@@ -285,17 +284,11 @@ impl PegaEngine {
 
         let mut layer_contexts: Vec<LayerContext> = Vec::with_capacity(saves.len());
         let mut hashes_to_save: HashSet<Vec<u8>> = HashSet::new();
-        // Plan 3: pre-copied CPU data indexed by (layer_name, block_idx).
-        let mut pre_copied_registry: std::collections::HashMap<
-            String,
-            std::collections::HashMap<usize, Vec<u8>>,
-        > = std::collections::HashMap::new();
 
         for LayerSave {
             layer_name,
             block_ids,
             block_hashes,
-            block_data,
         } in saves
         {
             // Engine-level contract: in-process callers bypass the RPC-layer
@@ -307,26 +300,6 @@ impl PegaEngine {
                     block_hashes.len(),
                     layer_name
                 )));
-            }
-
-            // Collect pre-copied CPU data (Plan 3).  Build a map from
-            // block_idx → bytes so we can look them up after the hash
-            // filter removes already-cached blocks.
-            let mut pre_copied_map: std::collections::HashMap<usize, Vec<u8>> =
-                std::collections::HashMap::new();
-            if !block_data.is_empty() {
-                if block_data.len() != block_ids.len() {
-                    return Err(EngineError::InvalidArgument(format!(
-                        "block_data length {} does not match block_ids length {} for layer {}",
-                        block_data.len(),
-                        block_ids.len(),
-                        layer_name
-                    )));
-                }
-                for (idx, data) in block_ids.iter().zip(block_data) {
-                    pre_copied_map.insert(*idx as usize, data);
-                }
-                pre_copied_registry.insert(layer_name.clone(), pre_copied_map);
             }
 
             let layer_id = topology.layer_id(&layer_name)?;
@@ -498,21 +471,6 @@ impl PegaEngine {
                     }
                 }
 
-                // Plan 3: extract pre_copied CPU data for surviving blocks.
-                let layer_pre_copied_map = pre_copied_registry
-                    .remove(&ctx.layer_name)
-                    .unwrap_or_default();
-                let pre_copied: Vec<Vec<u8>> = if layer_pre_copied_map.is_empty() {
-                    vec![]
-                } else {
-                    ctx.blocks_to_save
-                        .iter()
-                        .filter_map(|(block_idx, _)| {
-                            layer_pre_copied_map.get(block_idx).cloned()
-                        })
-                        .collect()
-                };
-
                 let save_blocks: Vec<TransferBlock> = ctx
                     .blocks_to_save
                     .iter()
@@ -527,7 +485,6 @@ impl PegaEngine {
                     layer_name: ctx.layer_name.clone(),
                     layout: layout.clone(),
                     blocks: save_blocks,
-                    pre_copied,
                 });
             }
         }

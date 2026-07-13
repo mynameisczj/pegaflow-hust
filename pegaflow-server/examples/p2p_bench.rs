@@ -545,7 +545,7 @@ async fn run_holder(cli: &Cli, shape: &Shape, pool_bytes: usize) {
             let saves = layer_names
                 .iter()
                 .map(|name| LayerSave {
-                block_data: vec![],
+                
                     layer_name: name.clone(),
                     block_ids: block_ids.clone(),
                     block_hashes: block_hashes.clone(),

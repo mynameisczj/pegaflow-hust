@@ -62,11 +62,6 @@ pub(crate) struct LayerTransferData {
     pub layer_name: String,
     pub layout: KVCacheLayout,
     pub blocks: Vec<TransferBlock>,
-    /// Pre-copied CPU data from the Python connector (Plan 3).
-    /// When non-empty, process_save_task writes this directly into the
-    /// host buffers instead of performing D2H via aclrtMemcpyAsync.
-    /// One entry per block, same order as `blocks`.
-    pub pre_copied: Vec<Vec<u8>>,
 }
 
 /// Host-side block image for a GPU transfer.
@@ -534,45 +529,15 @@ fn process_save_task(
     let start = std::time::Instant::now();
     let total_blocks: usize = layers.iter().map(|l| l.blocks.len()).sum();
 
-    // Plan 3: handle pre-copied CPU data from Python-side D2H.
-    // Write pre-copied bytes directly into host buffers.
-    let all_pre_copied = layers.iter().all(|l| !l.pre_copied.is_empty());
-    for layer in layers.iter().filter(|l| !l.pre_copied.is_empty()) {
-        if layer.pre_copied.len() != layer.blocks.len() {
-            return Err(EngineError::InvalidArgument(format!(
-                "pre_copied data length {} != blocks length {} for layer {}",
-                layer.pre_copied.len(),
-                layer.blocks.len(),
-                layer.layer_name
-            )));
-        }
-        let block_size = layer.layout.padded_block_bytes();
-        for (block, data) in layer.blocks.iter().zip(layer.pre_copied.iter()) {
-            if data.len() != block_size {
-                return Err(EngineError::InvalidArgument(format!(
-                    "pre_copied data size {} != block size {} for layer {} block {}",
-                    data.len(), block_size, layer.layer_name, block.block_idx
-                )));
-            }
-            let seg_ptr = block.block.raw().segment_ptr(0)
-                .ok_or_else(|| EngineError::InvalidArgument(format!(
-                    "raw block has no segment 0 for layer {} block {}",
-                    layer.layer_name, block.block_idx
-                )))?;
-            let dst = unsafe { seg_ptr.as_ptr().add(block.block.host_offset()) };
-            unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), dst, block_size); }
-        }
-    }
+    let (copies, total_bytes) = build_copy_descs(layers)?;
 
-    // D2H: skip entirely when all layers have pre-copied data.
-    let (copies, total_bytes) = if all_pre_copied {
-        (vec![], 0usize)
-    } else {
-        build_copy_descs(layers)?
-    };
-    if !copies.is_empty() {
-        backend.d2h(&copies, stream).map_err(EngineError::Storage)?;
-    }
+    // TODO(ascend): backend.d2h() requires device memory allocated via
+    // aclrtMallocPhysical.  When camem_allocator integration is complete
+    // (see §7.2 方案 A/B), this call will succeed natively.  Until then,
+    // it returns Err(EngineError::Storage("aclrtMemcpyAsync(D2H) failed: 507899")).
+    // No fallback is attempted — the synchronous aclrtMemcpy fallback may
+    // segfault on non-aclrtMallocPhysical memory (ascend.rs:408-415).
+    backend.d2h(&copies, stream).map_err(EngineError::Storage)?;
 
     // Single synchronization for all layers
     stream

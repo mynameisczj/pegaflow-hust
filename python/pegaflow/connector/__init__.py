@@ -395,16 +395,12 @@ class NoopKVConnector(KVConnectorBase_V1):
 def _resolve_device_id() -> int:
     """Return the global device id even when visibility env vars mask devices.
 
-    Handles both CUDA_VISIBLE_DEVICES (CUDA) and ASCEND_VISIBLE_DEVICES (NPU).
-    Falls back to local index when no visibility masking is active.
+    Handles CUDA_VISIBLE_DEVICES. Falls back to local index when no visibility
+    masking is active.
     """
     if torch.cuda.is_available():
         local_id = torch.cuda.current_device()
         visible = os.environ.get("CUDA_VISIBLE_DEVICES")
-        return _map_device(local_id, visible)
-    if torch.npu.is_available():
-        local_id = torch.npu.current_device()
-        visible = os.environ.get("ASCEND_VISIBLE_DEVICES")
         return _map_device(local_id, visible)
     return 0
 

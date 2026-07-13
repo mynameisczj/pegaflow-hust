@@ -17,7 +17,7 @@ mod trace {
 }
 mod utils;
 
-pub use registry::{DeviceTensorRegistry, RegistryHandle};
+pub use registry::{CudaTensorRegistry, RegistryHandle};
 pub use service::GrpcEngineService;
 
 use clap::Parser;
@@ -506,7 +506,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         devices
     );
 
-    let registry = DeviceTensorRegistry::new().map_err(|err| {
+    let registry = CudaTensorRegistry::new().map_err(|err| {
         let msg = format_py_err(err);
         std::io::Error::other(format!("failed to initialize torch device context: {msg}"))
     })?;

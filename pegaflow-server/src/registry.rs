@@ -42,11 +42,11 @@ impl ContextState {
     }
 }
 
-pub struct DeviceTensorRegistry {
+pub struct CudaTensorRegistry {
     contexts: HashMap<String, ContextState>,
 }
 
-impl DeviceTensorRegistry {
+impl CudaTensorRegistry {
     pub fn new() -> PyResult<Self> {
         Python::attach(|py| {
             let torch = py.import("torch")?;
@@ -244,7 +244,7 @@ enum RegistryCommand {
     },
 }
 
-/// Async handle to a [`DeviceTensorRegistry`] that lives on its own OS thread.
+/// Async handle to a [`CudaTensorRegistry`] that lives on its own OS thread.
 ///
 /// Every mutating op takes the GIL and may run a blocking
 /// device cache flush — which never returns if the device is wedged. Confining
@@ -262,7 +262,7 @@ pub struct RegistryHandle {
 impl RegistryHandle {
     /// Move `registry` onto a dedicated `device-registry` thread and return an
     /// async handle to it. The thread runs until every handle is dropped.
-    pub fn spawn(registry: DeviceTensorRegistry) -> Self {
+    pub fn spawn(registry: CudaTensorRegistry) -> Self {
         // Bounds how many register/cleanup requests queue before callers await
         // for space; the actor drains them one at a time under the GIL.
         let (tx, rx) = mpsc::channel(64);
@@ -329,7 +329,7 @@ impl RegistryHandle {
 
 /// Owns the registry and drains commands serially. Each op runs synchronously
 /// on this thread, so a GIL/CUDA stall blocks only here.
-fn registry_actor(mut registry: DeviceTensorRegistry, mut rx: mpsc::Receiver<RegistryCommand>) {
+fn registry_actor(mut registry: CudaTensorRegistry, mut rx: mpsc::Receiver<RegistryCommand>) {
     while let Some(cmd) = rx.blocking_recv() {
         match cmd {
             RegistryCommand::RegisterLayers {
@@ -364,7 +364,7 @@ mod tests {
 
     #[test]
     fn drop_context_removes_only_that_context() {
-        let mut registry = DeviceTensorRegistry::empty();
+        let mut registry = CudaTensorRegistry::empty();
         registry
             .contexts
             .insert("instance-a:tp0:pp0:dev0".to_string(), ContextState::new(0));
@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn register_layers_rejects_existing_context_before_materializing() {
-        let mut registry = DeviceTensorRegistry::empty();
+        let mut registry = CudaTensorRegistry::empty();
         registry
             .contexts
             .insert("instance-a:tp0:pp0:dev0".to_string(), ContextState::new(7));

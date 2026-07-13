@@ -335,7 +335,7 @@ async fn p2p_rdma_remote_fetch_roundtrip() {
             0,
             DEVICE_ID,
             vec![LayerSave {
-                block_data: vec![],
+                
                 layer_name: LAYER.to_string(),
                 block_ids: block_ids.clone(),
                 block_hashes: block_hashes.clone(),

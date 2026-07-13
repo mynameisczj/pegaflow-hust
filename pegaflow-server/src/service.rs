@@ -3,7 +3,7 @@ use pegaflow_core::{trace_in_span, trace_root};
 use crate::metric::record_rpc_result;
 use crate::proto::engine::engine_server::Engine;
 use crate::proto::engine::{
-    HealthRequest, HealthResponse, LoadedLayer, LoadRequest, LoadResponse, QueryBlocksForTransferRequest,
+    HealthRequest, HealthResponse, LoadRequest, LoadResponse, QueryBlocksForTransferRequest,
     QueryBlocksForTransferResponse, QueryLoading, QueryReady, QueryRequest, QueryResponse,
     RdmaHandshakeRequest, RdmaHandshakeResponse, RegisterContextRequest, RegisterContextResponse,
     ReleaseRequest, ReleaseResponse, ReleaseTransferLockRequest, ReleaseTransferLockResponse,
@@ -389,7 +389,6 @@ impl Engine for GrpcEngineService {
                     layer_name: layer.layer_name,
                     block_ids: layer.block_ids.into_iter().map(|id| id as usize).collect(),
                     block_hashes: layer.block_hashes,
-                    block_data: layer.block_data,
                 })
                 .collect();
 
@@ -476,41 +475,21 @@ impl Engine for GrpcEngineService {
                 })
                 .collect::<Result<_, _>>()?;
 
-            // Plan 3 (Ascend): read CPU block data directly from storage
-            // instead of performing H2D via aclrtMemcpyAsync which fails
-            // with error 507899 on expandable_segments-allocated tensors.
-            let loaded_layers = self
-                .engine
-                .read_block_data_for_leases(
-                    &instance_id,
-                    tp_rank,
-                    &layer_refs,
-                    &loads,
-                )
-                .map_err(Self::map_engine_error)?;
-
-            let layers: Vec<LoadedLayer> = loaded_layers
-                .into_iter()
-                .map(|(layer_name, block_data)| LoadedLayer {
-                    layer_name,
-                    block_data,
-                })
-                .collect();
-
-            // Also attempt the normal H2D load path for non-Ascend backends;
-            // ignore failures here — the connector will use the CPU data.
-            let _ = self.engine.batch_load_kv_blocks_multi_layer(
+            // TODO(ascend): batch_load_kv_blocks_multi_layer requires device
+            // memory allocated via aclrtMallocPhysical (see §7.2 方案 A/B).
+            // When camem_allocator is ready, this will perform native H2D DMA.
+            // Until then, returns Err on Ascend (aclrtMemcpyAsync H2D → 507899).
+            self.engine.batch_load_kv_blocks_multi_layer(
                 &instance_id,
                 tp_rank,
                 device_id,
                 &load_state_shm,
                 &layer_refs,
                 &loads,
-            );
+            ).map_err(Self::map_engine_error)?;
 
             Ok(Response::new(LoadResponse {
                 status: Some(Self::build_simple_response()),
-                layers,
             }))
         };
 
