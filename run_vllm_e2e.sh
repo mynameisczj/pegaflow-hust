@@ -16,7 +16,7 @@
 
 set -euo pipefail
 
-NPU_DEVICE="${1:-5}"
+NPU_DEVICE="${1:-2}"
 GRPC_PORT=50055
 VLLM_PORT=8100
 TAG="vllm-e2e-$(date +%H%M%S)"
@@ -45,6 +45,7 @@ echo "============================================================"
 echo "[0/5] Cleaning up stale processes..."
 kill $(ps aux | grep "pegaflow-server-py" | grep -v grep | awk '{print $2}') 2>/dev/null || true
 kill $(ps aux | grep "vllm.entrypoints" | grep -v grep | awk '{print $2}') 2>/dev/null || true
+kill $(ps aux | grep "EngineCore" | grep -v grep | awk '{print $2}') 2>/dev/null || true
 sleep 2
 
 # ---- Build ----
@@ -108,7 +109,7 @@ echo "[4/5] Sending requests..."
 LONG_PROMPT="Write a comprehensive essay about artificial intelligence. Cover the history from the 1950s to the present, major machine learning paradigms including supervised unsupervised and reinforcement learning, deep learning architectures like CNNs RNNs and Transformers, large language models, and ethical considerations. Provide detailed technical explanations and specific examples for each topic area discussed."
 
 for i in 1 2 3; do
-  echo -n "  Request ${i}: "
+  echo -n "  Request ${i}: "1
   t0=$(date +%s%N)
   RESP=$("${PYTHON}" -c "
 import urllib.request, json, time
@@ -128,8 +129,96 @@ else: print(f'OK tokens={d[\"usage\"][\"prompt_tokens\"]}/{d[\"usage\"][\"comple
   sleep 3
 done
 
-# ---- Check metrics ----
-echo "[5/5] Checking PegaFlow metrics..."
+# ---- Load test: shared prefix → prefix cache hit → H2D ----
+echo "[5/6] Load E2E test (shared prefix >128 tokens → cache hit → H2D)..."
+# IMPORTANT: the shared prefix must produce >= 256 tokens (2 full blocks at block_size=128)
+# so BOTH block 0 and block 1 share identical hashes across requests.
+# Each capital line is ~7 tokens — need ~37 unique lines for 256 tokens.
+SHARED_PREFIX="The capital of France is Paris. The capital of Germany is Berlin. The capital of Italy is Rome. The capital of Spain is Madrid. The capital of Portugal is Lisbon. The capital of Japan is Tokyo. The capital of China is Beijing. The capital of India is New Delhi. The capital of Brazil is Brasilia. The capital of Canada is Ottawa. The capital of Australia is Canberra. The capital of Russia is Moscow. The capital of Egypt is Cairo. The capital of South Korea is Seoul. The capital of Mexico is Mexico City. The capital of Argentina is Buenos Aires. The capital of Turkey is Ankara. The capital of Indonesia is Jakarta. The capital of Nigeria is Abuja. The capital of Kenya is Nairobi. The capital of South Africa is Pretoria. The capital of Sweden is Stockholm. The capital of Norway is Oslo. The capital of Denmark is Copenhagen. The capital of Finland is Helsinki. The capital of Poland is Warsaw. The capital of Ukraine is Kyiv. The capital of Greece is Athens. The capital of Thailand is Bangkok. The capital of Vietnam is Hanoi. The capital of Malaysia is Kuala Lumpur. The capital of Philippines is Manila. The capital of Iran is Tehran. The capital of Iraq is Baghdad. The capital of Saudi Arabia is Riyadh. The capital of Chile is Santiago. The capital of Peru is Lima."
+
+echo "  Load-1: writing prefix to cache..."
+RESP1=$("${PYTHON}" -c "
+import urllib.request, json
+data = json.dumps({
+    'model': '${MODEL}',
+    'messages': [{'role': 'user', 'content': '${SHARED_PREFIX}. What are the major rivers in each country?'}],
+    'max_tokens': 32
+}).encode()
+req = urllib.request.Request('http://127.0.0.1:${VLLM_PORT}/v1/chat/completions',
+    data=data, headers={'Content-Type': 'application/json'})
+d = json.loads(urllib.request.urlopen(req, timeout=120).read())
+if 'error' in d: print(f'ERROR: {d[\"error\"]}')
+else: print(f'OK tokens={d[\"usage\"][\"prompt_tokens\"]}/{d[\"usage\"][\"completion_tokens\"]}')
+" 2>&1)
+echo "    ${RESP1}"
+sleep 2
+
+# Wait for async save to land in PegaFlow cache before query.
+echo "  Waiting for async save to complete (checking cache insertions)..."
+for i in $(seq 1 30); do
+  PENDING=$("${PYTHON}" -c "
+import urllib.request
+resp = urllib.request.urlopen('http://127.0.0.1:9091/metrics')
+lines = resp.read().decode().split('\n')
+for l in lines:
+    l = l.strip()
+    if 'pegaflow_cache_block_insertions' in l and not l.startswith('#'):
+        print(l.split()[-1])
+" 2>/dev/null)
+  if [ -n "${PENDING}" ] && [ "${PENDING:-0}" -ge 1 ]; then
+    echo "    Save complete (${PENDING} blocks in cache after ${i}s)"
+    break
+  fi
+  sleep 1
+done
+
+echo "  Load-2: same prefix, different suffix → expect cache HIT + LOAD..."
+RESP2=$("${PYTHON}" -c "
+import urllib.request, json
+data = json.dumps({
+    'model': '${MODEL}',
+    'messages': [{'role': 'user', 'content': '${SHARED_PREFIX}. What is the population of each country?'}],
+    'max_tokens': 32
+}).encode()
+req = urllib.request.Request('http://127.0.0.1:${VLLM_PORT}/v1/chat/completions',
+    data=data, headers={'Content-Type': 'application/json'})
+d = json.loads(urllib.request.urlopen(req, timeout=120).read())
+if 'error' in d: print(f'ERROR: {d[\"error\"]}')
+else: print(f'OK tokens={d[\"usage\"][\"prompt_tokens\"]}/{d[\"usage\"][\"completion_tokens\"]}')
+" 2>&1)
+echo "    ${RESP2}"
+sleep 2
+
+echo "  Load-3: same prefix again → confirm multiple H2D works..."
+RESP3=$("${PYTHON}" -c "
+import urllib.request, json
+data = json.dumps({
+    'model': '${MODEL}',
+    'messages': [{'role': 'user', 'content': '${SHARED_PREFIX}. List the primary languages spoken in each country.'}],
+    'max_tokens': 32
+}).encode()
+req = urllib.request.Request('http://127.0.0.1:${VLLM_PORT}/v1/chat/completions',
+    data=data, headers={'Content-Type': 'application/json'})
+d = json.loads(urllib.request.urlopen(req, timeout=120).read())
+if 'error' in d: print(f'ERROR: {d[\"error\"]}')
+else: print(f'OK tokens={d[\"usage\"][\"prompt_tokens\"]}/{d[\"usage\"][\"completion_tokens\"]}')
+" 2>&1)
+echo "    ${RESP3}"
+
+# ---- Check vLLM-side KV transfer metrics ----
+echo "  vLLM KV Transfer metrics:"
+"${PYTHON}" -c "
+import urllib.request, json
+resp = urllib.request.urlopen('http://127.0.0.1:${VLLM_PORT}/metrics')
+lines = resp.read().decode().split('\n')
+for l in lines:
+    l = l.strip()
+    if 'vllm:kv_transfer' in l and not l.startswith('#'):
+        print(f'    {l}')
+" 2>&1
+
+# ---- Check PegaFlow metrics ----
+echo "[6/6] Checking PegaFlow metrics..."
 "${PYTHON}" -c "
 import urllib.request
 resp = urllib.request.urlopen('http://127.0.0.1:9091/metrics')
@@ -138,8 +227,13 @@ for l in lines:
     l = l.strip()
     if 'rpc_requests_total{method=\"register\"' in l and 'ok' in l: print(f'  REG:   {l}')
     if 'rpc_requests_total{method=\"save\"' in l and 'ok' in l: print(f'  SAVE:  {l}')
-    if 'save_bytes_total' in l and not l.startswith('#'): print(f'  BYTES: {l}')
-    if 'save_duration_seconds_count' in l and not l.startswith('#'): print(f'  OPS:   {l}')
+    if 'rpc_requests_total{method=\"load\"' in l and 'ok' in l: print(f'  LOAD:  {l}')
+    if 'save_bytes_total' in l and not l.startswith('#'): print(f'  SAVE_BYTES: {l}')
+    if 'load_bytes_total' in l and not l.startswith('#'): print(f'  LOAD_BYTES: {l}')
+    if 'save_duration_seconds_count' in l and not l.startswith('#'): print(f'  SAVE_OPS: {l}')
+    if 'load_duration_seconds_count' in l and not l.startswith('#'): print(f'  LOAD_OPS: {l}')
+    if 'cache_block_insertions' in l and not l.startswith('#'): print(f'  CACHE:   {l}')
+    if 'pegaflow_cache_resident_bytes' in l and not l.startswith('#'): print(f'  RESIDENT:{l}')
 "
 
 # ---- Cleanup ----
@@ -149,9 +243,13 @@ kill ${VLLM_PID} 2>/dev/null || true
 kill ${SERVER_PID} 2>/dev/null || true
 sleep 2
 
+# ---- Summary ----
 echo ""
 echo "============================================================"
 echo " vLLM + PegaFlow E2E Test Complete"
 echo " Tag: ${TAG}"
+echo ""
+echo " Expected: 3 saves + 3 saves (load test) = 6 saves"
+echo "           load test step 2,3 should trigger H2D via cache hit"
 echo " Logs: ${SERVER_LOG} / ${VLLM_LOG}"
 echo "============================================================"
