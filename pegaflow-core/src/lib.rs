@@ -9,6 +9,7 @@
 
 #[macro_use]
 mod trace;
+mod topology;
 
 mod allocator;
 mod backing;
@@ -141,6 +142,9 @@ impl PegaEngine {
     ) -> Result<Self, EngineError> {
         let topology = Arc::new(NumaTopology::detect());
         topology.log_summary();
+        // Cache the device→NUMA mapping so Ascend pinned-memory pool creation
+        // can resolve which NPU device to activate for each NUMA node.
+        topology::init_device_numa_map(topology.device_numa_map());
 
         let config = storage_config;
         let numa_nodes: Vec<NumaNode> = if config.enable_numa_affinity && topology.is_multi_numa() {

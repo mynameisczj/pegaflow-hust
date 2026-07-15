@@ -243,15 +243,19 @@ impl Drop for AscendDeviceStream {
 
 /// Allocate pinned host memory via `aclrtMallocHost`.
 ///
+/// `device_id` selects which NPU device context to activate before allocation.
 /// On Ascend, `aclrtMallocHost` returns both a host pointer and an
 /// associated device pointer in the same allocation, so no separate
 /// "get device pointer" call is needed.
-pub fn malloc_host(size: usize) -> Result<(*mut u8, *mut u8), String> {
+pub fn malloc_host(device_id: i32, size: usize) -> Result<(*mut u8, *mut u8), String> {
     ensure_acl_initialized()?;
-    // aclrtMallocHost requires an active device context
-    let ret = unsafe { aclrtSetDevice(0) };
+    // aclrtMallocHost requires an active device context.
+    // Use the provided device_id for NUMA-aware placement.
+    let ret = unsafe { aclrtSetDevice(device_id) };
     if ret != ACL_ERROR_NONE {
-        return Err(format!("aclrtSetDevice(0) before malloc_host({size}) failed: error code {ret}"));
+        return Err(format!(
+            "aclrtSetDevice({device_id}) before malloc_host({size}) failed: error code {ret}"
+        ));
     }
     if size == 0 {
         return Err("aclrtMallocHost: size must be > 0".into());

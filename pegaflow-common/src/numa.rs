@@ -531,6 +531,21 @@ impl NumaTopology {
             .unwrap_or(NumaNode::UNKNOWN)
     }
 
+    /// Reverse lookup: find any device attached to a given NUMA node.
+    ///
+    /// Returns `None` if no device is known to be on this NUMA node.
+    pub fn device_for_numa(&self, node: NumaNode) -> Option<i32> {
+        self.device_numa_map
+            .iter()
+            .find(|&(_, n)| *n == node)
+            .map(|(&dev, _)| dev)
+    }
+
+    /// Returns a clone of the device→NUMA node mapping for downstream caching.
+    pub fn device_numa_map(&self) -> HashMap<i32, NumaNode> {
+        self.device_numa_map.clone()
+    }
+
     /// Get all NUMA nodes in the system.
     pub fn numa_nodes(&self) -> &[NumaNode] {
         &self.numa_nodes

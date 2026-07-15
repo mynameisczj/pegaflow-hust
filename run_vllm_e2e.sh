@@ -24,14 +24,25 @@ SERVER_LOG="/tmp/pf-server-${TAG}.log"
 VLLM_LOG="/tmp/vllm-server-${TAG}.log"
 MODEL="/root/.cache/modelscope/models/qwen--Qwen2.5-0.5B-Instruct/snapshots/master"
 
+# Resolve Ascend paths from environment, with sensible fallbacks.
+ASCEND_HOME="${ASCEND_HOME_PATH:-/usr/local/Ascend/cann-8.5.1}"
+ASCEND_DRIVER="${ASCEND_HOME_PATH:+$(dirname "$ASCEND_HOME_PATH")/driver}/lib64/driver"
+ASCEND_DRIVER="${ASCEND_DRIVER:-/usr/local/Ascend/driver/lib64/driver}"
+ATB_LIB=$(ls -d /usr/local/Ascend/nnal/atb/*/atb/cxx_abi_1/lib 2>/dev/null | head -1)
+ATB_LIB="${ATB_LIB:-/usr/local/Ascend/nnal/atb/8.5.1/atb/cxx_abi_1/lib}"
+# Use PEGAFLOW_VENV if set, otherwise try the vllm-hust-dev conda env.
+# (CONDA_PREFIX is NOT used because it points to the base conda, not the env.)
+VENV_DIR="${PEGAFLOW_VENV:-/root/miniconda3/envs/vllm-hust-dev}"
+PYTHON="${VENV_DIR}/bin/python"
+
 export LD_LIBRARY_PATH="\
-/root/miniconda3/envs/vllm-hust-dev/lib:\
-/usr/local/Ascend/cann-8.5.1/aarch64-linux/lib64:\
-/usr/local/Ascend/driver/lib64/driver:\
-/usr/local/Ascend/nnal/atb/8.5.1/atb/cxx_abi_1/lib"
+${VENV_DIR}/lib:\
+${ASCEND_HOME}/lib64:\
+${ASCEND_HOME}/aarch64-linux/lib64:\
+${ASCEND_DRIVER}:\
+${ATB_LIB}"
 export ASCEND_VISIBLE_DEVICES="${NPU_DEVICE}"
 export VLLM_PLUGINS=ascend
-PYTHON="/root/miniconda3/envs/vllm-hust-dev/bin/python"
 CARGO_TARGET="/workspace/pegaflow-hust/target/debug"
 
 echo "============================================================"
@@ -53,7 +64,7 @@ echo "[1/5] Building pegaflow..."
 cd /workspace/pegaflow-hust
 PYO3_PYTHON="${PYTHON}" cargo build --no-default-features --features ascend \
   -p pegaflow-py --bin pegaflow-server-py 2>&1 | tail -1
-cp -f "${CARGO_TARGET}/libpegaflow.so" \
+\cp -f "${CARGO_TARGET}/libpegaflow.so" \
   /workspace/pegaflow-hust/python/pegaflow/pegaflow.cpython-311-aarch64-linux-gnu.so
 echo "  Build OK"
 

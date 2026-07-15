@@ -1,14 +1,37 @@
 fn main() {
     #[cfg(feature = "ascend")]
     {
-        // Locate the Ascend CANN library path
-        let ascend_lib_dirs = [
+        // Resolve Ascend CANN library paths dynamically from environment.
+        // Priority: ASCEND_HOME_PATH > ASCEND_HOME > hardcoded fallbacks.
+        let ascend_home = std::env::var("ASCEND_HOME_PATH")
+            .or_else(|_| std::env::var("ASCEND_HOME"))
+            .ok();
+
+        let mut lib_dirs: Vec<String> = Vec::new();
+        if let Some(ref home) = ascend_home {
+            // Architecture-specific subdir first, then generic.
+            lib_dirs.push(format!("{home}/aarch64-linux/lib64"));
+            lib_dirs.push(format!("{home}/lib64"));
+        }
+
+        // Fallback: common default paths (used when env vars are unset).
+        let fallbacks = [
             "/usr/local/Ascend/cann-8.5.1/aarch64-linux/lib64",
+            "/usr/local/Ascend/cann-8.5.1/lib64",
             "/usr/local/Ascend/ascend-toolkit/latest/aarch64-linux/lib64",
             "/usr/local/Ascend/ascend-toolkit/latest/lib64",
+            "/usr/local/Ascend/cann/aarch64-linux/lib64",
+            "/usr/local/Ascend/cann/lib64",
         ];
+        for fb in fallbacks {
+            if !lib_dirs.contains(&fb.to_string()) {
+                lib_dirs.push(fb.to_string());
+            }
+        }
 
-        for dir in ascend_lib_dirs {
+        // Emit link-search for every candidate directory.
+        // Cargo silently ignores directories that do not exist, so this is safe.
+        for dir in &lib_dirs {
             println!("cargo:rustc-link-search=native={dir}");
         }
 
@@ -16,6 +39,7 @@ fn main() {
         println!("cargo:rustc-link-lib=dylib=ascendcl");
 
         println!("cargo:rerun-if-changed=build.rs");
+        println!("cargo:rerun-if-env-changed=ASCEND_HOME_PATH");
         println!("cargo:rerun-if-env-changed=ASCEND_HOME");
     }
 }
