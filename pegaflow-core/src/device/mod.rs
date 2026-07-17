@@ -2,7 +2,8 @@
 //!
 //! Provides [`DeviceContext`] and [`DeviceStream`] enums that wrap
 //! CUDA or Ascend-specific handles behind a unified interface for
-//! GPU worker pools and transfer backends.
+//! GPU worker pools, transfer backends, and event-based
+//! synchronization.
 
 #[cfg(feature = "cuda")]
 pub mod cuda;
@@ -97,14 +98,34 @@ impl DeviceStream {
     }
 
     /// Record an event on this stream. Returns an opaque event handle.
-    #[cfg(feature = "cuda")]
+    ///
+    /// The returned handle can be passed to [`DeviceStream::wait_event`] to
+    /// block until all preceding work on this stream has completed.
+    #[cfg(any(feature = "cuda", feature = "ascend"))]
     pub fn record_event(&self) -> Result<Box<dyn std::any::Any + Send>, String> {
         match self {
-            DeviceStream::Cuda(s) => s.record_event(),
+            #[cfg(feature = "cuda")]
+            DeviceStream::Cuda(s) => s.record_event().map(|e| Box::new(e) as Box<dyn std::any::Any + Send>),
             #[cfg(feature = "ascend")]
-            DeviceStream::Ascend(_) => {
-                Err("record_event: Ascend backend not yet supported".into())
-            }
+            DeviceStream::Ascend(s) => s.record_event().map(|e| Box::new(e) as Box<dyn std::any::Any + Send>),
         }
+    }
+
+    /// Block until a previously recorded event completes.
+    ///
+    /// `event` must have been obtained from [`DeviceStream::record_event`]
+    /// on a stream of the same backend type.
+    #[cfg(any(feature = "cuda", feature = "ascend"))]
+    pub fn wait_event(event: &Box<dyn std::any::Any + Send>) -> Result<(), String> {
+        #[cfg(feature = "cuda")]
+        if let Some(e) = event.downcast_ref::<cudarc::driver::CudaEvent>() {
+            return e.synchronize()
+                .map_err(|e| format!("cuda event synchronize failed: {e:?}"));
+        }
+        #[cfg(feature = "ascend")]
+        if let Some(e) = event.downcast_ref::<ascend::AscendEvent>() {
+            return e.synchronize();
+        }
+        Err("wait_event: unrecognized event type".into())
     }
 }

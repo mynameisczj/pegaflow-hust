@@ -2,6 +2,7 @@
 //!
 //! Uses `extern "C"` FFI to call CANN `libascendcl.so` APIs:
 //! `aclrtSetDevice`, `aclrtCreateStream`, `aclrtSynchronizeStream`,
+//! `aclrtCreateEvent`, `aclrtRecordEvent`, `aclrtSynchronizeEvent`,
 //! `aclrtMemcpyAsync` (HOST_TO_DEVICE / DEVICE_TO_HOST).
 //!
 //! # Safety
@@ -21,6 +22,9 @@ type aclError = i32;
 
 #[allow(non_camel_case_types)]
 type aclrtStream = *mut c_void;
+
+#[allow(non_camel_case_types)]
+type aclrtEvent = *mut c_void;
 
 #[allow(non_camel_case_types, dead_code)]
 type aclrtContext = *mut c_void;
@@ -88,6 +92,22 @@ unsafe extern "C" {
 
     /// Get C_ANN runtime version.
     fn aclrtGetVersion(major: *mut i32, minor: *mut i32, patch: *mut i32) -> aclError;
+
+    // -- Event APIs -----------------------------------------------------
+
+    /// Create an event. `flag` is reserved (pass 0).
+    fn aclrtCreateEvent(event: *mut aclrtEvent) -> aclError;
+
+    /// Destroy an event.
+    fn aclrtDestroyEvent(event: aclrtEvent) -> aclError;
+
+    /// Record an event into a stream, capturing the stream's progress at
+    /// this point so the CPU (or another stream) can later wait on it.
+    fn aclrtRecordEvent(event: aclrtEvent, stream: aclrtStream) -> aclError;
+
+    /// Block the calling thread until the event is recorded (i.e. until
+    /// all preceding work in the event's stream has completed).
+    fn aclrtSynchronizeEvent(event: aclrtEvent) -> aclError;
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +233,14 @@ impl AscendDeviceStream {
         Ok(())
     }
 
+    /// Record an event on this stream, capturing the stream's progress so the
+    /// CPU (or another stream) can later wait on this specific point.
+    pub fn record_event(&self) -> Result<AscendEvent, String> {
+        let event = AscendEvent::new()?;
+        event.record(self.stream)?;
+        Ok(event)
+    }
+
     /// Return the raw `aclrtStream` handle.
     pub(crate) fn inner(&self) -> aclrtStream {
         self.stream
@@ -231,6 +259,100 @@ impl Drop for AscendDeviceStream {
                 let ret = unsafe { aclrtDestroyStream(self.stream) };
                 if ret != ACL_ERROR_NONE {
                     log::warn!("aclrtDestroyStream failed: error code {ret}");
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AscendEvent
+// ---------------------------------------------------------------------------
+
+/// Ascend event handle wrapping an `aclrtEvent`.
+///
+/// Events allow fine-grained synchronization: record an event into a stream,
+/// then later wait on that specific event (rather than synchronizing the
+/// entire stream). This is useful when multiple operations are in-flight on
+/// the same stream and the caller only needs to wait for a subset.
+///
+/// # Example
+///
+/// ```ignore
+/// let event = stream.record_event()?;
+/// // ... submit more work to stream ...
+/// AscendEvent::wait(&event)?;  // blocks until the event point is reached
+/// ```
+#[derive(Debug)]
+pub struct AscendEvent {
+    event: aclrtEvent,
+}
+
+impl AscendEvent {
+    /// Create a new event.
+    ///
+    /// `flag` is reserved and always set to 0.
+    pub fn new() -> Result<Self, String> {
+        ensure_acl_initialized()?;
+        let mut event: aclrtEvent = std::ptr::null_mut();
+        let ret = unsafe { aclrtCreateEvent(&mut event) };
+        if ret != ACL_ERROR_NONE {
+            return Err(format!("aclrtCreateEvent failed: error code {ret}"));
+        }
+        if event.is_null() {
+            return Err("aclrtCreateEvent returned null event".into());
+        }
+        Ok(Self { event })
+    }
+
+    /// Record this event into the given stream.
+    ///
+    /// The event captures the stream's progress at the point of this call;
+    /// subsequent waits on this event will block until all preceding work
+    /// in `stream` has completed.
+    pub fn record(&self, stream: aclrtStream) -> Result<(), String> {
+        let ret = unsafe { aclrtRecordEvent(self.event, stream) };
+        if ret != ACL_ERROR_NONE {
+            return Err(format!("aclrtRecordEvent failed: error code {ret}"));
+        }
+        Ok(())
+    }
+
+    /// Block the calling thread until this event is recorded.
+    ///
+    /// Equivalent to `cudaEventSynchronize` / `aclrtSynchronizeEvent`.
+    pub fn synchronize(&self) -> Result<(), String> {
+        let ret = unsafe { aclrtSynchronizeEvent(self.event) };
+        if ret != ACL_ERROR_NONE {
+            return Err(format!("aclrtSynchronizeEvent failed: error code {ret}"));
+        }
+        Ok(())
+    }
+
+    /// Convenience helper: block until a previously recorded event completes.
+    ///
+    /// The `event` is the value returned by
+    /// [`DeviceStream::record_event`](super::DeviceStream::record_event).
+    /// Downcasts to either `AscendEvent` or `CudaEvent` and synchronizes.
+    pub fn wait(event: &Box<dyn std::any::Any + Send>) -> Result<(), String> {
+        event
+            .downcast_ref::<Self>()
+            .ok_or_else(|| "wait_event: event is not an AscendEvent".to_string())?
+            .synchronize()
+    }
+}
+
+// SAFETY: `aclrtEvent` is a handle that can be sent across threads.
+unsafe impl Send for AscendEvent {}
+unsafe impl Sync for AscendEvent {}
+
+impl Drop for AscendEvent {
+    fn drop(&mut self) {
+        if !self.event.is_null() {
+            if ensure_acl_initialized().is_ok() {
+                let ret = unsafe { aclrtDestroyEvent(self.event) };
+                if ret != ACL_ERROR_NONE {
+                    log::warn!("aclrtDestroyEvent failed: error code {ret}");
                 }
             }
         }
@@ -551,5 +673,17 @@ mod tests {
         let device = AscendDevice::new(3).unwrap();
         let debug = format!("{device:?}");
         assert!(debug.contains("3"));
+    }
+
+    // -- Event tests (off-device smoke) ----------------------------------
+
+    /// `AscendEvent::wait` rejects a non-AscendEvent box.
+    #[test]
+    fn ascend_event_wait_rejects_wrong_type() {
+        // Box a plain integer — should fail to downcast.
+        let wrong: Box<dyn std::any::Any + Send> = Box::new(42i32);
+        let result = AscendEvent::wait(&wrong);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not an AscendEvent"));
     }
 }

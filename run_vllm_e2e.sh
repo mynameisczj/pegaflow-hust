@@ -20,7 +20,7 @@ NPU_DEVICE="${1:-2}"
 GRPC_PORT=50055
 VLLM_PORT=8100
 TAG="vllm-e2e-$(date +%H%M%S)"
-SERVER_LOG="/tmp/pf-server-${TAG}.log"
+SERVER_LOG="/tmp/pf-server-${TAG}.log"111
 VLLM_LOG="/tmp/vllm-server-${TAG}.log"
 MODEL="/root/.cache/modelscope/models/qwen--Qwen2.5-0.5B-Instruct/snapshots/master"
 
@@ -43,7 +43,23 @@ ${ASCEND_DRIVER}:\
 ${ATB_LIB}"
 export ASCEND_VISIBLE_DEVICES="${NPU_DEVICE}"
 export VLLM_PLUGINS=ascend
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
 CARGO_TARGET="/workspace/pegaflow-hust/target/debug"
+
+# Health check using Python urllib to avoid curl libldap conflict with
+# Ascend LD_LIBRARY_PATH.
+health_check() {
+  local url="$1"
+  "${PYTHON}" -c "
+import urllib.request, sys
+try:
+    resp = urllib.request.urlopen('${url}', timeout=5)
+    resp.read()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
 
 echo "============================================================"
 echo " PegaFlow + vLLM E2E Integration Test"
@@ -53,23 +69,23 @@ echo " Tag: ${TAG}"
 echo "============================================================"
 
 # ---- Cleanup ----
-echo "[0/5] Cleaning up stale processes..."
+echo "[0/6] Cleaning up stale processes..."
 kill $(ps aux | grep "pegaflow-server-py" | grep -v grep | awk '{print $2}') 2>/dev/null || true
 kill $(ps aux | grep "vllm.entrypoints" | grep -v grep | awk '{print $2}') 2>/dev/null || true
 kill $(ps aux | grep "EngineCore" | grep -v grep | awk '{print $2}') 2>/dev/null || true
 sleep 2
 
 # ---- Build ----
-echo "[1/5] Building pegaflow..."
+echo "[1/6] Building pegaflow..."
 cd /workspace/pegaflow-hust
 PYO3_PYTHON="${PYTHON}" cargo build --no-default-features --features ascend \
-  -p pegaflow-py --bin pegaflow-server-py 2>&1 | tail -1
+  -p pegaflow-py --lib --bin pegaflow-server-py 2>&1 | tail -1
 \cp -f "${CARGO_TARGET}/libpegaflow.so" \
   /workspace/pegaflow-hust/python/pegaflow/pegaflow.cpython-311-aarch64-linux-gnu.so
 echo "  Build OK"
 
 # ---- Start pegaflow-server ----
-echo "[2/5] Starting pegaflow-server..."
+echo "[2/6] Starting pegaflow-server..."
 nohup "${CARGO_TARGET}/pegaflow-server-py" \
   --addr "127.0.0.1:${GRPC_PORT}" \
   --devices "${NPU_DEVICE}" \
@@ -77,9 +93,10 @@ nohup "${CARGO_TARGET}/pegaflow-server-py" \
   --disable-numa-affinity \
   > "${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
+disown ${SERVER_PID} 2>/dev/null || true
 
 for i in $(seq 1 30); do
-  if curl -sf http://127.0.0.1:9091/health >/dev/null 2>&1; then
+  if health_check "http://127.0.0.1:9091/health"; then
     echo "  Server ready (${i}s)"
     break
   fi
@@ -90,7 +107,7 @@ for i in $(seq 1 30); do
 done
 
 # ---- Start vLLM ----
-echo "[3/5] Starting vLLM API server (model loading takes 30-90s)..."
+echo "[3/6] Starting vLLM API server (model loading takes 30-90s)..."
 nohup "${PYTHON}" -m vllm.entrypoints.openai.api_server \
   --model "${MODEL}" \
   --port "${VLLM_PORT}" \
@@ -100,12 +117,24 @@ nohup "${PYTHON}" -m vllm.entrypoints.openai.api_server \
   --kv-transfer-config '{"kv_connector":"PegaKVConnector","kv_role":"kv_both","kv_connector_module_path":"pegaflow.connector"}' \
   > "${VLLM_LOG}" 2>&1 &
 VLLM_PID=$!
+disown ${VLLM_PID} 2>/dev/null || true
 
 for i in $(seq 1 180); do
-  if curl -sf "http://127.0.0.1:${VLLM_PORT}/health" >/dev/null 2>&1; then
-    echo "  vLLM ready (${i}s)"
+  HEALTH_OUT=$("${PYTHON}" -c "
+import urllib.request, sys
+try:
+    resp = urllib.request.urlopen('http://127.0.0.1:${VLLM_PORT}/health', timeout=5)
+    print(resp.read().decode().strip())
+    sys.exit(0)
+except Exception as e:
+    print(str(e), file=sys.stderr)
+    sys.exit(1)
+" 2>&1) && HEALTH_RC=0 || HEALTH_RC=$?
+  if [ ${HEALTH_RC} -eq 0 ]; then
+    echo "  vLLM ready (${i}s): ${HEALTH_OUT}"
     break
   fi
+  sleep 1
   if ! kill -0 ${VLLM_PID} 2>/dev/null; then
     echo "  FAIL: vLLM crashed."
     grep -E "error|Error|panic|PegaKV|connect" "${VLLM_LOG}" | tail -10
@@ -116,7 +145,7 @@ for i in $(seq 1 180); do
 done
 
 # ---- Send requests ----
-echo "[4/5] Sending requests..."
+echo "[4/6] Sending requests..."
 LONG_PROMPT="Write a comprehensive essay about artificial intelligence. Cover the history from the 1950s to the present, major machine learning paradigms including supervised unsupervised and reinforcement learning, deep learning architectures like CNNs RNNs and Transformers, large language models, and ethical considerations. Provide detailed technical explanations and specific examples for each topic area discussed."
 
 for i in 1 2 3; do
