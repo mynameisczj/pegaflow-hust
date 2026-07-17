@@ -281,12 +281,11 @@ pub fn get_npu_device_count() -> Option<u32> {
             // Count lines that look like "NPU ID" / "Chip ID" entries.
             for line in stdout.lines() {
                 let trimmed = line.trim();
-                if trimmed.starts_with("Count") || trimmed.starts_with("Chip Count") {
-                    if let Some(val) = trimmed.split(':').nth(1) {
-                        if let Ok(count) = val.trim().parse::<u32>() {
-                            return Some(count);
-                        }
-                    }
+                if (trimmed.starts_with("Count") || trimmed.starts_with("Chip Count"))
+                    && let Some(val) = trimmed.split(':').nth(1)
+                    && let Ok(count) = val.trim().parse::<u32>()
+                {
+                    return Some(count);
                 }
             }
         }
@@ -317,12 +316,11 @@ pub fn get_npu_device_count() -> Option<u32> {
 pub fn get_npu_numa_node(device_id: u32) -> NumaNode {
     // Method 1: sysfs (fastest, most reliable, no external binary needed)
     let numa_node_path = format!("/sys/class/davinci/davinci{device_id}/device/numa_node");
-    if let Ok(content) = fs::read_to_string(&numa_node_path) {
-        if let Ok(node) = content.trim().parse::<i32>() {
-            if node >= 0 {
-                return NumaNode(node as u32);
-            }
-        }
+    if let Ok(content) = fs::read_to_string(&numa_node_path)
+        && let Ok(node) = content.trim().parse::<i32>()
+        && node >= 0
+    {
+        return NumaNode(node as u32);
     }
 
     // Method 2: npu-smi topology query
