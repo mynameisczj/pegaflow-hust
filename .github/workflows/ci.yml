@@ -167,33 +167,17 @@ jobs:
           uv run --isolated --no-project --with pytest --with numpy --with 'requests>=2.26.0' pytest
 
   # --------------------------------------------------------------------
-  # P2: Feature-variant compile checks (needs system deps, no GPU)
+  # P2: Ascend compile check (this project targets Ascend NPU only)
   # --------------------------------------------------------------------
 
-  cargo-check-variant:
-    name: cargo check (${{ matrix.variant }})
+  cargo-check-ascend:
+    name: cargo check (ascend)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - variant: cu12
-            cuda-version: '12.8.1'
-            cargo-features: ""
-          - variant: cu13
-            cuda-version: '13.0.2'
-            cargo-features: "--no-default-features --features cuda-13,rdma"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v0.2.35
-        with:
-          cuda: ${{ matrix.cuda-version }}
-          linux-local-args: '["--toolkit"]'
-          method: 'network'
-          sub-packages: '["nvcc", "nvrtc-dev", "cudart-dev"]'
       - name: Install protobuf compiler and RDMA headers
         run: |
           sudo apt-get update
@@ -204,45 +188,20 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: Run cargo check
         run: |
-          cargo check -p pegaflow-core ${{ matrix.cargo-features }}
-          cargo check -p pegaflow-server ${{ matrix.cargo-features }} --all-targets
+          cargo check --no-default-features --features ascend -p pegaflow-core
+          cargo check --no-default-features --features ascend -p pegaflow-server --all-targets
         env:
           CUDA_PATH: /usr/local/cuda
-
-  # Ascend variant: best-effort (needs CANN headers; allow failure if runner lacks Ascend SDK)
-  cargo-check-ascend:
-    name: cargo check (ascend)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Install protobuf compiler and RDMA headers
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libibverbs-dev
-      - name: Install rust toolchain
-        uses: dtolnay/rust-toolchain@1.97.0
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-      - name: Try cargo check (ascend)
-        run: |
-          cargo check --no-default-features --features ascend -p pegaflow-core 2>&1 || {
-            echo "::warning ::Ascend SDK not available on this runner — skipping ascend build check"
-            exit 0
-          }
 
   cargo-check:
     name: cargo check
     if: always()
-    needs: cargo-check-variant
+    needs: cargo-check-ascend
     runs-on: ubuntu-latest
     steps:
       - name: Check results
         run: |
-          if [[ "${{ needs.cargo-check-variant.result }}" != "success" ]]; then
-            echo "cargo check variants failed"
+          if [[ "${{ needs.cargo-check-ascend.result }}" != "success" ]]; then
+            echo "cargo check (ascend) failed"
             exit 1
           fi
