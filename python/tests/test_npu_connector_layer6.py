@@ -31,7 +31,7 @@ def _import_resolve_device_id():
     # Try to import from the actual module. If torch is not installed,
     # we'll test the logic in isolation.
     try:
-        from pegaflow.connector import _resolve_device_id, _map_device
+        from pegaflow.connector import _map_device, _resolve_device_id
 
         return _resolve_device_id, _map_device
     except ImportError:

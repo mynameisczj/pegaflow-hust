@@ -31,32 +31,32 @@ def create_server_socket(host: str, port: int) -> socket.socket:
     # Also set SO_REUSEPORT to match vLLM behavior
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     sock.bind((host, port))
-    print(f"[PARENT {os.getpid()}] Socket bound to {host}:{port}, fd={sock.fileno()}")
+    print("[PARENT {os.getpid()}] Socket bound to {host}:{port}, fd={sock.fileno()}")
     return sock
 
 
 def child_process(sock_fd: int):
     """Simulate EngineCore process — inherits fds but does NOT use the server socket."""
     pid = os.getpid()
-    print(f"[CHILD {pid}] Started (inherited fd={sock_fd})")
+    print("[CHILD {pid}] Started (inherited fd={sock_fd})")
 
     # Print all open fds to verify the socket is inherited
     try:
         fd_dir = f"/proc/{pid}/fd"
         fds = os.listdir(fd_dir)
-        print(f"[CHILD {pid}] Open fds: {sorted(int(f) for f in fds)}")
+        print("[CHILD {pid}] Open fds: {sorted(int(f) for f in fds)}")
         for fd_name in sorted(fds, key=int):
             try:
                 link = os.readlink(os.path.join(fd_dir, fd_name))
                 if "socket" in link:
-                    print(f"[CHILD {pid}]   fd {fd_name} -> {link}")
+                    print("[CHILD {pid}]   fd {fd_name} -> {link}")
             except OSError:
                 pass
-    except Exception as e:
-        print(f"[CHILD {pid}] Cannot list fds: {e}")
+    except Exception:
+        print("[CHILD {pid}] Cannot list fds: {e}")
 
     # Sleep to keep the process alive (like EngineCore does)
-    print(f"[CHILD {pid}] Sleeping (simulating EngineCore busy loop)...")
+    print("[CHILD {pid}] Sleeping (simulating EngineCore busy loop)...")
     time.sleep(600)  # 10 min, longer than the TCP delay
 
 
@@ -70,12 +70,12 @@ t0 = time.monotonic()
 try:
     s.connect(('{host}', {port}))
     dt = time.monotonic() - t0
-    print(f"[{label}] CONNECTED after {{dt:.3f}}s")
+    print("[{label}] CONNECTED after {{dt:.3f}}s")
     s.close()
     sys.exit(0)
 except Exception as e:
     dt = time.monotonic() - t0
-    print(f"[{label}] FAILED after {{dt:.3f}}s: {{e}}")
+    print("[{label}] FAILED after {{dt:.3f}}s: {{e}}")
     sys.exit(1)
 """
     proc = subprocess.run(
@@ -84,7 +84,7 @@ except Exception as e:
     )
     print(proc.stdout.strip())
     if proc.stderr.strip():
-        print(f"  stderr: {proc.stderr.strip()}")
+        print("  stderr: {proc.stderr.strip()}")
     return proc.returncode == 0
 
 
@@ -95,13 +95,13 @@ def self_connect(host: str, port: int, timeout: float = 5.0):
     t0 = time.monotonic()
     try:
         s.connect((host, port))
-        dt = time.monotonic() - t0
-        print(f"[SELF_CONNECT] CONNECTED after {dt:.3f}s")
+        time.monotonic() - t0
+        print("[SELF_CONNECT] CONNECTED after {dt:.3f}s")
         s.close()
         return True
-    except Exception as e:
-        dt = time.monotonic() - t0
-        print(f"[SELF_CONNECT] FAILED after {dt:.3f}s: {e}")
+    except Exception:
+        time.monotonic() - t0
+        print("[SELF_CONNECT] FAILED after {dt:.3f}s: {e}")
         return False
 
 
@@ -111,7 +111,7 @@ def test_fork_mode():
     sock = create_server_socket(HOST, PORT)
     sock_fd = sock.fileno()
 
-    print(f"\n=== Forking child process ===")
+    print("\n=== Forking child process ===")
     pid = os.fork()
     if pid == 0:
         # Child: simulate EngineCore
@@ -120,19 +120,19 @@ def test_fork_mode():
         os._exit(0)
     else:
         # Parent: start listening
-        print(f"[PARENT {os.getpid()}] Child PID = {pid}")
+        print("[PARENT {os.getpid()}] Child PID = {pid}")
         sock.listen(128)
-        print(f"[PARENT {os.getpid()}] Socket listening, entering accept loop...")
+        print("[PARENT {os.getpid()}] Socket listening, entering accept loop...")
 
         # Give child time to start
         time.sleep(1)
 
         # Test 1: Self-connect (same process)
-        print(f"\n--- Test 1: Self-connect ---")
+        print("\n--- Test 1: Self-connect ---")
         self_connect(HOST, PORT)
 
         # Test 2: External connect (from subprocess)
-        print(f"\n--- Test 2: External connect (every 2s, max 30s) ---")
+        print("\n--- Test 2: External connect (every 2s, max 30s) ---")
         for i in range(15):
             time.sleep(2)
             if external_connect(HOST, PORT, f"EXT_iter{i}"):
@@ -152,23 +152,23 @@ def test_fork_with_inheritance():
     sock = create_server_socket(HOST, PORT)
     sock_fd = sock.fileno()
 
-    print(f"\n=== Forking child (KEEPING inherited socket) ===")
+    print("\n=== Forking child (KEEPING inherited socket) ===")
     pid = os.fork()
     if pid == 0:
         # Child: keep the inherited socket (like EngineCore does)
         child_process(sock_fd)
         os._exit(0)
     else:
-        print(f"[PARENT {os.getpid()}] Child PID = {pid}")
+        print("[PARENT {os.getpid()}] Child PID = {pid}")
         sock.listen(128)
-        print(f"[PARENT {os.getpid()}] Socket listening, entering accept loop...")
+        print("[PARENT {os.getpid()}] Socket listening, entering accept loop...")
 
         time.sleep(1)
 
-        print(f"\n--- Test 1: Self-connect ---")
+        print("\n--- Test 1: Self-connect ---")
         self_connect(HOST, PORT)
 
-        print(f"\n--- Test 2: External connect (every 2s, max 60s) ---")
+        print("\n--- Test 2: External connect (every 2s, max 60s) ---")
         success = False
         for i in range(30):
             time.sleep(2)
@@ -189,23 +189,23 @@ def test_spawn_mode():
     HOST, PORT = "127.0.0.1", 19993
     sock = create_server_socket(HOST, PORT)
 
-    print(f"\n=== Spawning child via multiprocessing (no fd inheritance) ===")
+    print("\n=== Spawning child via multiprocessing (no fd inheritance) ===")
 
     # Use spawn to launch child — no fd inheritance
     ctx = multiprocessing.get_context("spawn")
     proc = ctx.Process(target=child_process, args=(-1,))
     proc.start()
 
-    print(f"[PARENT {os.getpid()}] Child PID = {proc.pid}")
+    print("[PARENT {os.getpid()}] Child PID = {proc.pid}")
     sock.listen(128)
-    print(f"[PARENT {os.getpid()}] Socket listening, entering accept loop...")
+    print("[PARENT {os.getpid()}] Socket listening, entering accept loop...")
 
     time.sleep(1)
 
-    print(f"\n--- Test 1: Self-connect ---")
+    print("\n--- Test 1: Self-connect ---")
     self_connect(HOST, PORT)
 
-    print(f"\n--- Test 2: External connect (every 2s, max 30s) ---")
+    print("\n--- Test 2: External connect (every 2s, max 30s) ---")
     success = False
     for i in range(15):
         time.sleep(2)
@@ -249,11 +249,11 @@ def check_engine_core_fds():
                         sockets.append((fd_name, link))
                 except OSError:
                     pass
-            print(f"  PID {pid}: {len(sockets)} socket fds")
+            print("  PID {pid}: {len(sockets)} socket fds")
             for fd_name, link in sockets[:20]:
-                print(f"    fd {fd_name}: {link}")
-    except Exception as e:
-        print(f"Error: {e}")
+                print("    fd {fd_name}: {link}")
+    except Exception:
+        print("Error: {e}")
 
 
 def main():
@@ -277,20 +277,20 @@ def main():
         print("\n\n" + "=" * 60)
         print("TEST B: fork WITH socket inheritance (exact vLLM behavior)")
         print("=" * 60)
-        result_b = test_fork_with_inheritance()
+        test_fork_with_inheritance()
 
         print("\n\n" + "=" * 60)
         print("TEST C: spawn mode (child does NOT inherit fds)")
         print("=" * 60)
-        result_c = test_spawn_mode()
+        test_spawn_mode()
 
         print("\n\n" + "=" * 60)
         print("SUMMARY")
         print("=" * 60)
-        print(f"  Test B (fork + inherit): {'FAIL (reproduced!)' if not result_b else 'PASS'}")
-        print(f"  Test C (spawn):          {'PASS (fixed!)' if result_c else 'FAIL'}")
+        print("  Test B (fork + inherit): {'FAIL (reproduced!)' if not result_b else 'PASS'}")
+        print("  Test C (spawn):          {'PASS (fixed!)' if result_c else 'FAIL'}")
     else:
-        print(f"Unknown mode: {mode}")
+        print("Unknown mode: {mode}")
         print("Usage: python3 {sys.argv[0]} [fork|fork-inherit|spawn|check|compare]")
 
 

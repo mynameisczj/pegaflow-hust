@@ -335,18 +335,17 @@ pub fn get_npu_numa_node(device_id: u32) -> NumaNode {
             &device_id.to_string(),
         ])
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            // npu-smi topo output may contain NUMA affinity info.
-            // Look for lines like "NUMA Node: 1" or "numa_node: 1".
-            for line in stdout.lines() {
-                let lower = line.to_lowercase();
-                if lower.contains("numa") && lower.contains("node") {
-                    // Try to extract the first number from this line.
-                    if let Some(node) = parse_first_int(line) {
-                        return NumaNode(node);
-                    }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // npu-smi topo output may contain NUMA affinity info.
+        // Look for lines like "NUMA Node: 1" or "numa_node: 1".
+        for line in stdout.lines() {
+            let lower = line.to_lowercase();
+            if lower.contains("numa") && lower.contains("node") {
+                // Try to extract the first number from this line.
+                if let Some(node) = parse_first_int(line) {
+                    return NumaNode(node);
                 }
             }
         }
@@ -358,10 +357,8 @@ pub fn get_npu_numa_node(device_id: u32) -> NumaNode {
 /// Extract the first unsigned integer from a string.
 fn parse_first_int(s: &str) -> Option<u32> {
     for token in s.split(|c: char| !c.is_ascii_digit()) {
-        if !token.is_empty() {
-            if let Ok(n) = token.parse::<u32>() {
-                return Some(n);
-            }
+        if !token.is_empty() && let Ok(n) = token.parse::<u32>() {
+            return Some(n);
         }
     }
     None

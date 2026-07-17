@@ -16,7 +16,6 @@ import threading
 
 import torch
 
-
 # ---------------------------------------------------------------------------
 # CANN IPC constants
 # ---------------------------------------------------------------------------
@@ -135,10 +134,14 @@ def _npu_ipc_close_ctypes(key: bytes) -> None:
 
 _C_EXT_AVAILABLE = False
 try:
+    from pegaflow.npu_ipc_bindings._npu_ipc import (
+        close_key as _npu_ipc_close_key_c,
+    )
     from pegaflow.npu_ipc_bindings._npu_ipc import (  # type: ignore[import-untyped]
         export_key as _npu_ipc_export_key_c,
+    )
+    from pegaflow.npu_ipc_bindings._npu_ipc import (
         import_key as _npu_ipc_import_key_c,
-        close_key as _npu_ipc_close_key_c,
     )
     _C_EXT_AVAILABLE = True
 except ImportError:
