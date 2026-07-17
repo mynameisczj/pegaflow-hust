@@ -5,10 +5,10 @@
 //! GPU worker pools, transfer backends, and event-based
 //! synchronization.
 
-#[cfg(feature = "cuda")]
-pub mod cuda;
 #[cfg(feature = "ascend")]
 pub mod ascend;
+#[cfg(feature = "cuda")]
+pub mod cuda;
 
 /// Unified device context handle.
 ///
@@ -85,7 +85,9 @@ impl DeviceStream {
             DeviceStream::Cuda(s) => {
                 // SAFETY: the CudaSlice allocation is isolated to CUDA memory.
                 unsafe {
-                    let slice: CudaSlice<T> = s.stream.alloc_zeros::<T>(len)
+                    let slice: CudaSlice<T> = s
+                        .stream
+                        .alloc_zeros::<T>(len)
                         .map_err(|e| format!("alloc_zeros failed: {e:?}"))?;
                     Ok(Box::new(slice))
                 }
@@ -105,9 +107,13 @@ impl DeviceStream {
     pub fn record_event(&self) -> Result<Box<dyn std::any::Any + Send>, String> {
         match self {
             #[cfg(feature = "cuda")]
-            DeviceStream::Cuda(s) => s.record_event().map(|e| Box::new(e) as Box<dyn std::any::Any + Send>),
+            DeviceStream::Cuda(s) => s
+                .record_event()
+                .map(|e| Box::new(e) as Box<dyn std::any::Any + Send>),
             #[cfg(feature = "ascend")]
-            DeviceStream::Ascend(s) => s.record_event().map(|e| Box::new(e) as Box<dyn std::any::Any + Send>),
+            DeviceStream::Ascend(s) => s
+                .record_event()
+                .map(|e| Box::new(e) as Box<dyn std::any::Any + Send>),
         }
     }
 
@@ -119,7 +125,8 @@ impl DeviceStream {
     pub fn wait_event(event: &Box<dyn std::any::Any + Send>) -> Result<(), String> {
         #[cfg(feature = "cuda")]
         if let Some(e) = event.downcast_ref::<cudarc::driver::CudaEvent>() {
-            return e.synchronize()
+            return e
+                .synchronize()
                 .map_err(|e| format!("cuda event synchronize failed: {e:?}"));
         }
         #[cfg(feature = "ascend")]

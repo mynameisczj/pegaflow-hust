@@ -233,9 +233,8 @@ impl PinnedMemory {
         if size == 0 {
             return Err(PinnedMemError::ZeroSize);
         }
-        let (host, device) =
-            crate::device::ascend::malloc_host(device_id, size)
-                .map_err(PinnedMemError::AscendAllocFailed)?;
+        let (host, device) = crate::device::ascend::malloc_host(device_id, size)
+            .map_err(PinnedMemError::AscendAllocFailed)?;
         let ptr = NonNull::new(host).expect("aclrtMallocHost returned null");
         let device_ptr = NonNull::new(device).expect("aclrtMallocHost returned null device ptr");
         Ok(Self {

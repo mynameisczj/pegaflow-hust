@@ -274,14 +274,12 @@ fn build_backend(
     ctx: &DeviceContext,
 ) -> Result<Box<dyn TransferBackend>, EngineError> {
     match mode {
-        TransferMode::Direct => {
-            match ctx {
-                #[cfg(feature = "cuda")]
-                DeviceContext::Cuda(_) => Ok(Box::new(MemcpyBackend)),
-                #[cfg(feature = "ascend")]
-                DeviceContext::Ascend(_) => Ok(Box::new(AscendMemcpyBackend)),
-            }
-        }
+        TransferMode::Direct => match ctx {
+            #[cfg(feature = "cuda")]
+            DeviceContext::Cuda(_) => Ok(Box::new(MemcpyBackend)),
+            #[cfg(feature = "ascend")]
+            DeviceContext::Ascend(_) => Ok(Box::new(AscendMemcpyBackend)),
+        },
         TransferMode::AscendDirect => {
             #[cfg(feature = "ascend")]
             {
@@ -297,8 +295,9 @@ fn build_backend(
             #[cfg(feature = "cuda")]
             {
                 if let DeviceContext::Cuda(ref cuda) = ctx {
-                    let kernel = KernelBackend::new(cuda.inner())
-                        .map_err(|e| EngineError::DeviceInit(format!("kernel backend init failed: {e}")))?;
+                    let kernel = KernelBackend::new(cuda.inner()).map_err(|e| {
+                        EngineError::DeviceInit(format!("kernel backend init failed: {e}"))
+                    })?;
                     return Ok(Box::new(kernel));
                 }
             }

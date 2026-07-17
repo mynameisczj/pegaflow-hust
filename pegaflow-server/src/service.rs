@@ -479,14 +479,16 @@ impl Engine for GrpcEngineService {
             // memory allocated via aclrtMallocPhysical (see §7.2 方案 A/B).
             // When camem_allocator is ready, this will perform native H2D DMA.
             // Until then, returns Err on Ascend (aclrtMemcpyAsync H2D → 507899).
-            self.engine.batch_load_kv_blocks_multi_layer(
-                &instance_id,
-                tp_rank,
-                device_id,
-                &load_state_shm,
-                &layer_refs,
-                &loads,
-            ).map_err(Self::map_engine_error)?;
+            self.engine
+                .batch_load_kv_blocks_multi_layer(
+                    &instance_id,
+                    tp_rank,
+                    device_id,
+                    &load_state_shm,
+                    &layer_refs,
+                    &loads,
+                )
+                .map_err(Self::map_engine_error)?;
 
             Ok(Response::new(LoadResponse {
                 status: Some(Self::build_simple_response()),

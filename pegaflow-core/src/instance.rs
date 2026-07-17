@@ -551,10 +551,7 @@ impl InstanceContext {
     /// # Errors
     /// Returns `EngineError::InvalidArgument` for negative device IDs,
     /// or `EngineError::DeviceInit` if device context creation fails.
-    fn build_device_context(
-        &self,
-        device_id: i32,
-    ) -> Result<DeviceContext, EngineError> {
+    fn build_device_context(&self, device_id: i32) -> Result<DeviceContext, EngineError> {
         if device_id < 0 {
             return Err(EngineError::InvalidArgument(format!(
                 "device_id {device_id} must be >= 0"
@@ -564,18 +561,16 @@ impl InstanceContext {
         #[cfg(feature = "cuda")]
         {
             use crate::device::cuda::CudaDevice;
-            let cuda = CudaDevice::new(device_id).map_err(|e| {
-                EngineError::DeviceInit(format!("CUDA device {device_id}: {e}"))
-            })?;
+            let cuda = CudaDevice::new(device_id)
+                .map_err(|e| EngineError::DeviceInit(format!("CUDA device {device_id}: {e}")))?;
             return Ok(DeviceContext::Cuda(Box::new(cuda)));
         }
 
         #[cfg(all(feature = "ascend", not(feature = "cuda")))]
         {
             use crate::device::ascend::AscendDevice;
-            let ascend = AscendDevice::new(device_id).map_err(|e| {
-                EngineError::DeviceInit(format!("Ascend device {device_id}: {e}"))
-            })?;
+            let ascend = AscendDevice::new(device_id)
+                .map_err(|e| EngineError::DeviceInit(format!("Ascend device {device_id}: {e}")))?;
             return Ok(DeviceContext::Ascend(ascend));
         }
 

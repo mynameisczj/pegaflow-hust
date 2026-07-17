@@ -274,19 +274,18 @@ pub fn get_npu_device_count() -> Option<u32> {
     if let Ok(output) = Command::new("npu-smi")
         .args(["info", "-t", "board", "-c", "0"])
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            // npu-smi info -t board outputs lines with chip/device info.
-            // Count lines that look like "NPU ID" / "Chip ID" entries.
-            for line in stdout.lines() {
-                let trimmed = line.trim();
-                if (trimmed.starts_with("Count") || trimmed.starts_with("Chip Count"))
-                    && let Some(val) = trimmed.split(':').nth(1)
-                    && let Ok(count) = val.trim().parse::<u32>()
-                {
-                    return Some(count);
-                }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // npu-smi info -t board outputs lines with chip/device info.
+        // Count lines that look like "NPU ID" / "Chip ID" entries.
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if (trimmed.starts_with("Count") || trimmed.starts_with("Chip Count"))
+                && let Some(val) = trimmed.split(':').nth(1)
+                && let Ok(count) = val.trim().parse::<u32>()
+            {
+                return Some(count);
             }
         }
     }
@@ -325,13 +324,7 @@ pub fn get_npu_numa_node(device_id: u32) -> NumaNode {
 
     // Method 2: npu-smi topology query
     if let Ok(output) = Command::new("npu-smi")
-        .args([
-            "info",
-            "-t",
-            "topo",
-            "-i",
-            &device_id.to_string(),
-        ])
+        .args(["info", "-t", "topo", "-i", &device_id.to_string()])
         .output()
         && output.status.success()
     {
@@ -355,7 +348,9 @@ pub fn get_npu_numa_node(device_id: u32) -> NumaNode {
 /// Extract the first unsigned integer from a string.
 fn parse_first_int(s: &str) -> Option<u32> {
     for token in s.split(|c: char| !c.is_ascii_digit()) {
-        if !token.is_empty() && let Ok(n) = token.parse::<u32>() {
+        if !token.is_empty()
+            && let Ok(n) = token.parse::<u32>()
+        {
             return Some(n);
         }
     }
@@ -460,13 +455,19 @@ fn get_gpu_numa_affinity() -> Vec<(u32, NumaNode)> {
 fn get_device_numa_affinity() -> Vec<(u32, NumaNode)> {
     let npu_affinity = get_npu_numa_affinity();
     if !npu_affinity.is_empty() {
-        log::debug!("Detected {} NPU device(s) via npu-smi/sysfs", npu_affinity.len());
+        log::debug!(
+            "Detected {} NPU device(s) via npu-smi/sysfs",
+            npu_affinity.len()
+        );
         return npu_affinity;
     }
 
     let gpu_affinity = get_gpu_numa_affinity();
     if !gpu_affinity.is_empty() {
-        log::debug!("Detected {} GPU device(s) via nvidia-smi", gpu_affinity.len());
+        log::debug!(
+            "Detected {} GPU device(s) via nvidia-smi",
+            gpu_affinity.len()
+        );
         return gpu_affinity;
     }
 
@@ -806,11 +807,7 @@ mod tests {
         match get_npu_device_count() {
             Some(count) if count >= 1 => {
                 // We expect a valid NUMA node if davinci0/device/numa_node exists.
-                if std::path::Path::new(
-                    "/sys/class/davinci/davinci0/device/numa_node",
-                )
-                .exists()
-                {
+                if std::path::Path::new("/sys/class/davinci/davinci0/device/numa_node").exists() {
                     assert!(
                         node.is_valid(),
                         "NPU device 0 exists but NUMA node is UNKNOWN"
@@ -838,10 +835,7 @@ mod tests {
         eprintln!("INFO: NPU NUMA affinity: {affinity:?}");
         // Verify each device has a valid NUMA node.
         for (device_id, node) in &affinity {
-            assert!(
-                node.is_valid(),
-                "device {device_id} has UNKNOWN NUMA node"
-            );
+            assert!(node.is_valid(), "device {device_id} has UNKNOWN NUMA node");
         }
         // Device IDs should be consecutive from 0.
         for (i, (device_id, _)) in affinity.iter().enumerate() {
@@ -857,7 +851,10 @@ mod tests {
     #[test]
     fn test_numa_topology_detect_with_npu() {
         let topology = NumaTopology::detect();
-        assert!(topology.num_nodes() >= 1, "should have at least 1 NUMA node");
+        assert!(
+            topology.num_nodes() >= 1,
+            "should have at least 1 NUMA node"
+        );
 
         let npu_count = get_npu_device_count();
         if let Some(expected) = npu_count

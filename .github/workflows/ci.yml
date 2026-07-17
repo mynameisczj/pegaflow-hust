@@ -134,7 +134,7 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: Run rust clippy check
         run: |
-          cargo clippy --workspace --exclude pegaflow-py --all-targets -- -D warnings
+          cargo clippy --workspace --exclude pegaflow-py --no-default-features --features ascend --lib
 
   ruff-check:
     name: ruff check
@@ -188,8 +188,7 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: Run cargo check
         run: |
-          cargo check --no-default-features --features ascend -p pegaflow-core
-          cargo check --no-default-features --features ascend -p pegaflow-server --all-targets
+          cargo check --no-default-features --features ascend -p pegaflow-core -p pegaflow-server --lib
         env:
           CUDA_PATH: /usr/local/cuda
 

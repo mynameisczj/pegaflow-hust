@@ -21,10 +21,6 @@ pub(crate) fn init_device_numa_map(map: HashMap<i32, NumaNode>) {
 pub(crate) fn resolve_device_for_numa(node: NumaNode) -> i32 {
     DEVICE_NUMA_MAP
         .get()
-        .and_then(|map| {
-            map.iter()
-                .find(|&(_, n)| *n == node)
-                .map(|(&dev, _)| dev)
-        })
+        .and_then(|map| map.iter().find(|&(_, n)| *n == node).map(|(&dev, _)| dev))
         .unwrap_or(0)
 }

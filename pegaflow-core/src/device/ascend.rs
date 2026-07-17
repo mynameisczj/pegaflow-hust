@@ -226,9 +226,7 @@ impl AscendDeviceStream {
     pub fn synchronize(&self) -> Result<(), String> {
         let ret = unsafe { aclrtSynchronizeStream(self.stream) };
         if ret != ACL_ERROR_NONE {
-            return Err(format!(
-                "aclrtSynchronizeStream failed: error code {ret}"
-            ));
+            return Err(format!("aclrtSynchronizeStream failed: error code {ret}"));
         }
         Ok(())
     }
@@ -254,12 +252,10 @@ unsafe impl Sync for AscendDeviceStream {}
 
 impl Drop for AscendDeviceStream {
     fn drop(&mut self) {
-        if !self.stream.is_null() {
-            if ensure_acl_initialized().is_ok() {
-                let ret = unsafe { aclrtDestroyStream(self.stream) };
-                if ret != ACL_ERROR_NONE {
-                    log::warn!("aclrtDestroyStream failed: error code {ret}");
-                }
+        if !self.stream.is_null() && ensure_acl_initialized().is_ok() {
+            let ret = unsafe { aclrtDestroyStream(self.stream) };
+            if ret != ACL_ERROR_NONE {
+                log::warn!("aclrtDestroyStream failed: error code {ret}");
             }
         }
     }
@@ -310,6 +306,7 @@ impl AscendEvent {
     /// The event captures the stream's progress at the point of this call;
     /// subsequent waits on this event will block until all preceding work
     /// in `stream` has completed.
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn record(&self, stream: aclrtStream) -> Result<(), String> {
         let ret = unsafe { aclrtRecordEvent(self.event, stream) };
         if ret != ACL_ERROR_NONE {
@@ -348,12 +345,10 @@ unsafe impl Sync for AscendEvent {}
 
 impl Drop for AscendEvent {
     fn drop(&mut self) {
-        if !self.event.is_null() {
-            if ensure_acl_initialized().is_ok() {
-                let ret = unsafe { aclrtDestroyEvent(self.event) };
-                if ret != ACL_ERROR_NONE {
-                    log::warn!("aclrtDestroyEvent failed: error code {ret}");
-                }
+        if !self.event.is_null() && ensure_acl_initialized().is_ok() {
+            let ret = unsafe { aclrtDestroyEvent(self.event) };
+            if ret != ACL_ERROR_NONE {
+                log::warn!("aclrtDestroyEvent failed: error code {ret}");
             }
         }
     }
@@ -411,7 +406,9 @@ pub fn free_host(ptr: *mut u8) -> Result<(), String> {
 /// Human-readable description for common CANN ACL error codes.
 fn acl_error_description(code: i32) -> &'static str {
     match code {
-        507899 => "memory not allocated via aclrtMallocPhysical (expandable_segments is not DMA-capable — use camem_allocator)",
+        507899 => {
+            "memory not allocated via aclrtMallocPhysical (expandable_segments is not DMA-capable — use camem_allocator)"
+        }
         207001 => "invalid parameter",
         207002 => "memory allocation failed",
         207003 => "device not available",
@@ -578,7 +575,9 @@ pub fn malloc_device(size: usize, policy: i32) -> Result<u64, String> {
     // aclrtMalloc requires an active device context
     let ret = unsafe { aclrtSetDevice(0) };
     if ret != ACL_ERROR_NONE {
-        return Err(format!("aclrtSetDevice(0) before malloc_device({size}) failed: error code {ret}"));
+        return Err(format!(
+            "aclrtSetDevice(0) before malloc_device({size}) failed: error code {ret}"
+        ));
     }
     if size == 0 {
         return Err("aclrtMalloc: size must be > 0".into());
@@ -609,7 +608,9 @@ pub fn memcpy_h2d_sync(dst_device: u64, src_host: *const u8, size: usize) -> Res
     ensure_acl_initialized()?;
     let ret = unsafe { aclrtSetDevice(0) };
     if ret != ACL_ERROR_NONE {
-        return Err(format!("aclrtSetDevice(0) before memcpy_h2d_sync failed: error code {ret}"));
+        return Err(format!(
+            "aclrtSetDevice(0) before memcpy_h2d_sync failed: error code {ret}"
+        ));
     }
     let ret = unsafe {
         aclrtMemcpy(

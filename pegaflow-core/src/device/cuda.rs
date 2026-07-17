@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaContext, CudaStream, CudaEvent};
+use cudarc::driver::{CudaContext, CudaEvent, CudaStream};
 
 /// CUDA device handle wrapping a `cudarc::driver::CudaContext`.
 #[derive(Debug, Clone)]
