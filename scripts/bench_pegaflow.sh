@@ -1,53 +1,73 @@
-1#!/bin/bash
+#!/bin/bash
 # ============================================================================
 # PegaFlow Prefix-Caching Performance Benchmark
 #
-# Compares vLLM serving throughput/TTFT with and without PegaFlow KV cache
-# offloading, using the vllm bench serve CLI and PegaFlow's Prometheus metrics.
+# Strategy (inspired by run_load_e2e.sh):
+#   Session 1: vLLM + PegaFlow → send fixed-prefix requests → D2H save
+#   Session 2: NEW vLLM + same pegaflow-server → SAME requests → H2D load ★
 #
-# The benchmark runs two configurations back-to-back on the same model:
-#   BASELINE: vllm serve without PegaFlow (pure local KV cache)
-#   PEGAFLOW: vllm serve + PegaKVConnector (external KV cache offload)
+# KEY: Same hardcoded shared prefix across sessions guarantees identical
+#      tokenization → identical block_hashes → external cache HIT.
 #
-# Metrics collected:
-#   - TTFT (time-to-first-token) p50/p95/p99 from vllm bench serve
-#   - Throughput (tokens/sec) from vllm bench serve
-#   - PegaFlow save/load bytes and cache hit rate from :9091/metrics
-#   - NPU memory usage from npu-smi
+# Model: Qwen2.5-7B-Instruct
 #
 # Usage:
 #   ./scripts/bench_pegaflow.sh [NPU_DEVICE_ID]
-#
-# Dependencies:
-#   - Ascend NPU + CANN runtime
-#   - Built pegaflow-server-py binary
-#   - vllm-hust Python venv with pegaflow connector installed
-#   - Qwen2.5-0.5B-Instruct model cached locally
 # ============================================================================
 
 set -euo pipefail
 
-# Ascend aclrtMallocHost requires locked memory for DMA-pinned allocations.
-# Container defaults may cap this at 64KB; raise it before starting.
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 ulimit -l unlimited
 
 NPU_DEVICE="${1:-2}"
 GRPC_PORT=50059
-VLLM_PORT=8100
+VLLM_PORT_1=8101
+VLLM_PORT_2=8102
 TAG="bench-$(date +%Y%m%d-%H%M%S)"
 RESULTS_DIR="/tmp/pegaflow-bench-${TAG}"
 
-# Model selection — Qwen2.5-0.5B for fast iteration.
-MODEL="/root/.cache/modelscope/models/qwen--Qwen2.5-0.5B-Instruct/snapshots/master"
+# Model: use 7B for meaningful KV cache size.
+MODEL="/root/.cache/modelscope/models/qwen--Qwen2.5-7B-Instruct/snapshots/master"
+MODEL_NAME="Qwen2.5-7B-Instruct"
 
-# Benchmark workload parameters.
-NUM_PROMPTS="${NUM_PROMPTS:-100}"
-INPUT_LEN="${INPUT_LEN:-512}"
-OUTPUT_LEN="${OUTPUT_LEN:-128}"
+# Workload.
+NUM_REQUESTS="${NUM_REQUESTS:-100}"
 CONCURRENCY="${CONCURRENCY:-8}"
-PREFIX_REUSE_RATIO="${PREFIX_REUSE_RATIO:-0.8}"
+MAX_TOKENS=150
 
-# Resolve paths.
+# Long shared prefix (>256 tokens = 2+ full blocks at block_size=128).
+# run_load_e2e.sh uses a similar pattern — this guarantees at least 2
+# full blocks are pure shared content.
+SHARED_PREFIX="The capital of France is Paris. The capital of Germany is Berlin. The capital of Italy is Rome. The capital of Spain is Madrid. The capital of Portugal is Lisbon. The capital of Japan is Tokyo. The capital of China is Beijing. The capital of India is New Delhi. The capital of Brazil is Brasilia. The capital of Canada is Ottawa. The capital of Australia is Canberra. The capital of Russia is Moscow. The capital of Egypt is Cairo. The capital of South Korea is Seoul. The capital of Mexico is Mexico City. The capital of Argentina is Buenos Aires. The capital of Turkey is Ankara. The capital of Indonesia is Jakarta. The capital of Nigeria is Abuja. The capital of Kenya is Nairobi. The capital of South Africa is Pretoria. The capital of Sweden is Stockholm. The capital of Norway is Oslo. The capital of Denmark is Copenhagen. The capital of Finland is Helsinki. The capital of Poland is Warsaw. The capital of Ukraine is Kyiv. The capital of Greece is Athens. The capital of Thailand is Bangkok. The capital of Vietnam is Hanoi. The capital of Malaysia is Kuala Lumpur. The capital of Philippines is Manila. The capital of Iran is Tehran. The capital of Iraq is Baghdad. The capital of Saudi Arabia is Riyadh. The capital of Chile is Santiago. The capital of Peru is Lima."
+
+# Unique suffixes — same across sessions so block_hashes match.
+SUFFIXES=(
+  "What are the major rivers in each country?"
+  "What is the population of each country?"
+  "List the primary languages spoken in each country."
+  "Describe the climate of each country."
+  "What is the cuisine like in each country?"
+  "Name the famous landmarks in each country."
+  "What is the history of each country?"
+  "Describe the education system in each country."
+  "What are the main exports of each country?"
+  "How is the transportation system in each country?"
+  "What sports are popular in each country?"
+  "Describe the architecture styles in each country."
+  "What festivals are celebrated in each country?"
+  "What is the political system of each country?"
+  "How is the healthcare system in each country?"
+  "What natural resources does each country have?"
+  "Describe the art and music scene in each country."
+  "What are the traditional costumes of each country?"
+  "How is the economy structured in each country?"
+  "What wildlife can be found in each country?"
+)
+
+# Paths.
 ASCEND_HOME="${ASCEND_HOME_PATH:-/usr/local/Ascend/cann-8.5.1}"
 ASCEND_DRIVER="${ASCEND_HOME_PATH:+$(dirname "$ASCEND_HOME_PATH")/driver}/lib64/driver"
 ASCEND_DRIVER="${ASCEND_DRIVER:-/usr/local/Ascend/driver/lib64/driver}"
@@ -58,7 +78,9 @@ PYTHON="${VENV_DIR}/bin/python"
 PEGAFLOW_DIR="/workspace/pegaflow-hust"
 CARGO_TARGET="${PEGAFLOW_DIR}/target/debug"
 SERVER_LOG="/tmp/pf-bench-server-${TAG}.log"
-VLLM_LOG="/tmp/pf-bench-vllm-${TAG}.log"
+VLLM1_LOG="/tmp/pf-bench-vllm1-${TAG}.log"
+VLLM2_LOG="/tmp/pf-bench-vllm2-${TAG}.log"
+BENCH_SCRIPT="${RESULTS_DIR}/run_bench.py"
 
 export LD_LIBRARY_PATH="\
 ${VENV_DIR}/lib:\
@@ -66,10 +88,13 @@ ${ASCEND_HOME}/lib64:\
 ${ASCEND_HOME}/aarch64-linux/lib64:\
 ${ASCEND_DRIVER}:\
 ${ATB_LIB}"
-export ASCEND_VISIBLE_DEVICES="${NPU_DEVICE}"
+# ASCEND_RT_VISIBLE_DEVICES is set per-vLLM-command below.
 export VLLM_PLUGINS=ascend
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export PYTHONHASHSEED=0
+# ASCEND_RT_VISIBLE_DEVICES is set per-command for vLLM only.
+# pegaflow-server manages its own devices via --devices (physical IDs)
+# and does NOT support device remapping.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,7 +114,6 @@ except Exception:
 }
 
 fetch_metric() {
-  # Fetch a single Prometheus metric value by name from a metrics endpoint.
   local url="$1" name="$2"
   "${PYTHON}" -c "
 import urllib.request
@@ -102,31 +126,164 @@ for l in r.read().decode().split('\n'):
 " 2>/dev/null || echo "0"
 }
 
-npufree_mb() {
-  npu-smi info 2>/dev/null \
-    | grep "^\s*|\s*${NPU_DEVICE}\s" \
-    | awk -F'|' '{print $8}' \
-    | tr -d ' /' \
-    || echo "N/A"
+wait_for_vllm() {
+  local pid="$1" log="$2" label="$3" port="$4" timeout="${5:-240}"
+  for i in $(seq 1 "${timeout}"); do
+    if health_check "http://127.0.0.1:${port}/health"; then
+      echo "  ${label} ready (${i}s)"; return 0
+    fi
+    if ! kill -0 ${pid} 2>/dev/null; then
+      echo "  FAIL: ${label} crashed."
+      grep -E "error|Error|panic|FATAL" "${log}" | tail -5
+      return 1
+    fi
+    sleep 3
+  done
+  echo "  FAIL: ${label} startup timed out"; return 1
 }
 
-# ---------------------------------------------------------------------------
-# Cleanup
-# ---------------------------------------------------------------------------
+wait_for_server() {
+  for i in $(seq 1 60); do
+    if health_check "http://127.0.0.1:9091/health"; then
+      echo "  Server ready (${i}s)"; return 0
+    fi
+    if ! kill -0 ${SERVER_PID} 2>/dev/null; then
+      echo "  FAIL: Server crashed."; tail -20 "${SERVER_LOG}"; exit 1
+    fi
+    sleep 1
+  done
+  echo "  FAIL: Server startup timed out"; exit 1
+}
 
-cleanup_all() {
-  echo "  [cleanup] stopping processes..."
-  kill ${VLLM_PID:-} 2>/dev/null || true
-  wait ${VLLM_PID:-} 2>/dev/null || true
-  if [ -n "${SERVER_PID:-}" ] && kill -0 ${SERVER_PID} 2>/dev/null; then
-    kill ${SERVER_PID} 2>/dev/null || true
-    wait ${SERVER_PID} 2>/dev/null || true
+kill_vllm_graceful() {
+  local pid="$1" label="$2"
+  echo "  Shutting down ${label}..."
+  kill ${pid} 2>/dev/null || true
+  for i in $(seq 1 120); do
+    if ! kill -0 ${pid} 2>/dev/null; then
+      echo "  ${label} exited gracefully (${i}s)"
+      break
+    fi
+    sleep 1
+  done
+  if kill -0 ${pid} 2>/dev/null; then
+    echo "  ${label} did not exit, force-killing..."
+    kill -9 ${pid} 2>/dev/null || true
   fi
-  pkill -9 -f "pegaflow-server-py"   2>/dev/null || true
-  pkill -9 -f "vllm.entrypoints"     2>/dev/null || true
-  pkill -9 -f "EngineCore"           2>/dev/null || true
+  wait ${pid} 2>/dev/null || true
+  pkill -9 -f "EngineCore" 2>/dev/null || true
   pkill -9 -f "multiprocessing.resource_tracker" 2>/dev/null || true
-  sleep 2
+  echo "  Waiting for NPU memory recovery..."
+  sleep 15
+}
+
+# Show memory status of all NPUs for diagnostics (uses Python for reliable parsing).
+show_npu_memory() {
+  echo "  NPU memory status:"
+  "${PYTHON}" -c "
+import subprocess, sys, re
+try:
+    out = subprocess.check_output(['npu-smi', 'info'], text=True, timeout=10)
+except Exception as e:
+    print(f'    npu-smi failed: {e}')
+    sys.exit(0)
+current_npu = None
+for line in out.split(chr(10)):
+    line = line.strip()
+    if not line.startswith('|'):
+        continue
+    parts = [p.strip() for p in line.split('|')]
+    if len(parts) < 3:
+        continue
+    first = parts[1]
+    # NPU row: starts with digit, contains chip model name
+    if first and first[0].isdigit() and len(first.split()) > 1:
+        current_npu = first.split()[0]
+    # Chip row: starts with single digit (chip id within NPU)
+    elif first and first.isdigit() and len(first) <= 2 and current_npu is not None:
+        # Last pipe-field contains AICore MemUsed/MemTotal HbmUsed/HbmTotal
+        last = parts[-2]  # penultimate field: trailing | creates empty last element
+        nums = re.findall(r'(\\d+)\s*/\s*(\\d+)', last)
+        if len(nums) >= 2:
+            hbm_used, hbm_total = int(nums[-1][0]), int(nums[-1][1])
+            hbm_free = hbm_total - hbm_used
+            print(f'    NPU {current_npu}: {hbm_free} MiB free / {hbm_total} MiB total ({hbm_used} MiB used)')
+" 2>/dev/null
+}
+
+# Get free HBM memory (MiB) for the target NPU.
+get_npu_free_mb() {
+  "${PYTHON}" -c "
+import subprocess, sys, re
+target = '${1}'
+try:
+    out = subprocess.check_output(['npu-smi', 'info'], text=True, timeout=10)
+except Exception:
+    print(0); sys.exit(0)
+current_npu = None
+for line in out.split(chr(10)):
+    line = line.strip()
+    if not line.startswith('|'):
+        continue
+    parts = [p.strip() for p in line.split('|')]
+    if len(parts) < 3:
+        continue
+    first = parts[1]
+    if first and first[0].isdigit() and len(first.split()) > 1:
+        current_npu = first.split()[0]
+    elif first and first.isdigit() and len(first) <= 2 and current_npu == target:
+        last = parts[-2]  # penultimate field: trailing | creates empty last element
+        nums = re.findall(r'(\\d+)\s*/\s*(\\d+)', last)
+        if len(nums) >= 2:
+            hbm_used, hbm_total = int(nums[-1][0]), int(nums[-1][1])
+            print(hbm_total - hbm_used)
+            sys.exit(0)
+print(0)
+" 2>/dev/null
+}
+
+
+# Poll until NPU has enough free memory. FATAL on timeout.
+wait_npu_memory() {
+  local min_free_mb="${1:-10000}" timeout="${2:-120}"
+  echo "  Checking NPU ${NPU_DEVICE} memory (need >= ${min_free_mb} MiB)..."
+  show_npu_memory
+  for i in $(seq 1 "${timeout}"); do
+    local free_mb
+    free_mb=$(get_npu_free_mb "${NPU_DEVICE}")
+    if [ -z "${free_mb}" ]; then
+      echo "  ERROR: Cannot read NPU memory via npu-smi. Is CANN installed?"
+      exit 1
+    fi
+    if [ "${free_mb}" -ge "${min_free_mb}" ]; then
+      echo "  NPU ${NPU_DEVICE}: ${free_mb} MiB free (need ${min_free_mb}) ✓"
+      return 0
+    fi
+    if [ $((i % 15)) -eq 0 ]; then
+      echo "  Waiting for NPU ${NPU_DEVICE} (${i}s, ${free_mb} < ${min_free_mb} MiB)..."
+    fi
+    sleep 1
+  done
+  local final_free
+  final_free=$(get_npu_free_mb "${NPU_DEVICE}")
+  echo ""
+  echo "  ERROR: NPU ${NPU_DEVICE} only ${final_free:-?} MiB free, need ${min_free_mb} MiB."
+  echo "  Leaked memory from force-killed processes. Reboot container or use clean NPU."
+  exit 1
+}
+
+# Full cleanup.
+cleanup_all() {
+  echo "  [cleanup] stopping everything..."
+  kill ${VLLM1_PID:-} 2>/dev/null || true
+  wait ${VLLM1_PID:-} 2>/dev/null || true
+  kill ${VLLM2_PID:-} 2>/dev/null || true
+  wait ${VLLM2_PID:-} 2>/dev/null || true
+  kill ${SERVER_PID:-} 2>/dev/null || true
+  wait ${SERVER_PID:-} 2>/dev/null || true
+  ps aux | grep -E "pegaflow-server-py|vllm.entrypoints|EngineCore" \
+    | grep -v grep | awk '{print $2}' | xargs -r kill -9 2>/dev/null || true
+  sleep 3
 }
 
 trap cleanup_all EXIT
@@ -135,18 +292,16 @@ mkdir -p "${RESULTS_DIR}"
 
 echo "============================================================"
 echo " PegaFlow Prefix-Caching Benchmark"
-echo " NPU: ${NPU_DEVICE}  Model: Qwen2.5-0.5B-Instruct"
+echo " NPU: ${NPU_DEVICE}  Model: ${MODEL_NAME}"
+echo " Requests: ${NUM_REQUESTS}  Concurrency: ${CONCURRENCY}"
 echo " Tag: ${TAG}"
-echo " Num prompts: ${NUM_PROMPTS}  Input len: ${INPUT_LEN}"
-echo " Output len: ${OUTPUT_LEN}  Concurrency: ${CONCURRENCY}"
-echo " Results: ${RESULTS_DIR}"
 echo "============================================================"
 
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
 echo ""
-echo "[1/8] Building pegaflow..."
+echo "[Build] Compiling pegaflow..."
 cd "${PEGAFLOW_DIR}"
 PYO3_PYTHON="${PYTHON}" cargo build --no-default-features --features ascend \
   -p pegaflow-py --lib --bin pegaflow-server-py 2>&1 | tail -3
@@ -155,70 +310,236 @@ PYO3_PYTHON="${PYTHON}" cargo build --no-default-features --features ascend \
 echo "  Build OK"
 
 # ---------------------------------------------------------------------------
-# Phase A: BASELINE (vllm without PegaFlow)
+# Cleanup before starting
 # ---------------------------------------------------------------------------
 echo ""
-echo "============================================================"
-echo " Phase A: BASELINE (native vLLM, no external KV cache)"
-echo "============================================================"
-
-cleanup_all
-
-VLLM_BASE_ARGS=(
-  --model "${MODEL}"
-  --port "${VLLM_PORT}"
-  --max-model-len $((INPUT_LEN + OUTPUT_LEN + 256))
-  --gpu-memory-utilization 0.1
-  --enforce-eager
-)
-
-echo "[2/8] Starting vLLM (baseline)..."
-nohup "${PYTHON}" -m vllm.entrypoints.openai.api_server "${VLLM_BASE_ARGS[@]}" \
-  > "${VLLM_LOG}" 2>&1 &
-VLLM_PID=$!
-disown ${VLLM_PID} 2>/dev/null || true
-
-for i in $(seq 1 180); do
-  if health_check "http://127.0.0.1:${VLLM_PORT}/health"; then
-    echo "  vLLM ready (${i}s)"
-    break
+echo "[Init] Checking NPU ${NPU_DEVICE} readiness..."
+# Show what's using each NPU (informational only — don't kill processes on other NPUs)
+show_npu_memory
+# Only clean up processes on OUR target NPU ports
+for port in ${VLLM_PORT_1} ${VLLM_PORT_2} ${GRPC_PORT}; do
+  pid_on_port=$("${PYTHON}" -c "
+import socket, os, signal
+try:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(1)
+    s.bind(('127.0.0.1', ${port}))
+    s.close()
+except OSError:
+    print('in_use')
+" 2>/dev/null)
+  if [ "${pid_on_port}" = "in_use" ]; then
+    echo "  Port ${port} is in use — attempting to free..."
+    fuser -k -n tcp ${port} 2>/dev/null || true
   fi
-  if ! kill -0 ${VLLM_PID} 2>/dev/null; then
-    echo "  FAIL: vLLM crashed."; tail -30 "${VLLM_LOG}"; exit 1
-  fi
-  sleep 3
 done
-
-echo "  NPU free: $(npufree_mb) MB"
-
-# Run benchmark
-echo "[3/8] Running baseline benchmark..."
-BASELINE_OUT="${RESULTS_DIR}/baseline_serve.json"
-"${PYTHON}" -m vllm.entrypoints.cli.main bench serve \
-  --backend openai-chat \
-  --base-url "http://127.0.0.1:${VLLM_PORT}" \
-  --model "${MODEL}" \
-  --endpoint /v1/chat/completions \
-  --num-prompts "${NUM_PROMPTS}" \
-  --max-concurrency "${CONCURRENCY}" \
-  --save-result \
-  --result-dir "${RESULTS_DIR}" \
-  --result-filename "$(basename "${BASELINE_OUT}")" \
-  2>&1 | tee "${RESULTS_DIR}/baseline_bench.log"
-
-BASELINE_NPU_AFTER=$(npufree_mb)
-
-cleanup_all
+# Give any terminated processes time to release NPU memory
+sleep 5
 
 # ---------------------------------------------------------------------------
-# Phase B: PEGAFLOW (vllm + PegaFlow external KV cache)
+# Generate benchmark Python script
 # ---------------------------------------------------------------------------
+cat > "${BENCH_SCRIPT}" << 'PYEOF'
+import sys, os, json, time, threading, queue
+import urllib.request
+
+NUM_REQUESTS = int(sys.argv[1]) if len(sys.argv) > 1 else 100
+CONCURRENCY = int(sys.argv[2]) if len(sys.argv) > 2 else 8
+BASE_URL    = sys.argv[3] if len(sys.argv) > 3 else "http://127.0.0.1:8101"
+MODEL       = sys.argv[4] if len(sys.argv) > 4 else ""
+OUTPUT_FILE = sys.argv[5] if len(sys.argv) > 5 else None
+
+SHARED_PREFIX = __import__('os').environ.get('PEGAFLOW_SHARED_PREFIX', 'The capital of France is Paris.')
+
+SUFFIXES = [
+    "What are the major rivers in each country?",
+    "What is the population of each country?",
+    "List the primary languages spoken in each country.",
+    "Describe the climate of each country.",
+    "What is the cuisine like in each country?",
+    "Name the famous landmarks in each country.",
+    "What is the history of each country?",
+    "Describe the education system in each country.",
+    "What are the main exports of each country?",
+    "How is the transportation system in each country?",
+    "What sports are popular in each country?",
+    "Describe the architecture styles in each country.",
+    "What festivals are celebrated in each country?",
+    "What is the political system of each country?",
+    "How is the healthcare system in each country?",
+    "What natural resources does each country have?",
+    "Describe the art and music scene in each country.",
+    "What are the traditional costumes of each country?",
+    "How is the economy structured in each country?",
+    "What wildlife can be found in each country?",
+]
+
+# Generate prompts deterministically: cycle through suffixes.
+def make_prompt(idx):
+    suffix = SUFFIXES[idx % len(SUFFIXES)]
+    return f"{SHARED_PREFIX}. {suffix}"
+
+results_lock = threading.Lock()
+results = []
+start_event = threading.Event()
+
+def send_request(idx):
+    prompt = make_prompt(idx)
+    data = json.dumps({
+        "model": MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 150,
+        "temperature": 0,
+    }).encode()
+    req = urllib.request.Request(
+        f"{BASE_URL}/v1/chat/completions",
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    t0 = time.perf_counter()
+    try:
+        resp = urllib.request.urlopen(req, timeout=120)
+        body = json.loads(resp.read())
+        ttft = (time.perf_counter() - t0) * 1000
+        usage = body.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        with results_lock:
+            results.append({
+                "idx": idx,
+                "ttft_ms": ttft,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "success": True,
+            })
+    except Exception as e:
+        ttft = (time.perf_counter() - t0) * 1000
+        with results_lock:
+            results.append({
+                "idx": idx,
+                "ttft_ms": ttft,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "success": False,
+                "error": str(e)[:200],
+            })
+
+def worker(idx_q):
+    while True:
+        try:
+            idx = idx_q.get_nowait()
+        except queue.Empty:
+            return
+        start_event.wait()
+        send_request(idx)
+
+print(f"Benchmark: {NUM_REQUESTS} requests, concurrency={CONCURRENCY}")
+print(f"Model: {MODEL}")
+print(f"Prefix: {SHARED_PREFIX[:80]}...")
+
+# Build work queue
+idx_q = queue.Queue()
+for i in range(NUM_REQUESTS):
+    idx_q.put(i)
+
+threads = []
+for _ in range(CONCURRENCY):
+    t = threading.Thread(target=worker, args=(idx_q,))
+    t.start()
+    threads.append(t)
+
+t_start = time.perf_counter()
+start_event.set()
+
+for t in threads:
+    t.join()
+
+duration = time.perf_counter() - t_start
+
+# Summarize
+successes = [r for r in results if r["success"]]
+failures  = [r for r in results if not r["success"]]
+
+ttfts = sorted([r["ttft_ms"] for r in successes])
+prompt_tokens  = sum(r["prompt_tokens"] for r in successes)
+completion_tokens = sum(r["completion_tokens"] for r in successes)
+
+def pct(lst, p):
+    if not lst: return float('nan')
+    k = (len(lst) - 1) * p / 100.0
+    f = int(k)
+    c = min(f + 1, len(lst) - 1)
+    return lst[f] + (lst[c] - lst[f]) * (k - f) if f < c else lst[f]
+
+output = {
+    "num_requests": NUM_REQUESTS,
+    "completed": len(successes),
+    "failed": len(failures),
+    "duration_s": duration,
+    "total_prompt_tokens": prompt_tokens,
+    "total_completion_tokens": completion_tokens,
+    "request_throughput": len(successes) / duration if duration > 0 else 0,
+    "output_throughput": completion_tokens / duration if duration > 0 else 0,
+    "mean_ttft_ms": sum(ttfts) / len(ttfts) if ttfts else float('nan'),
+    "median_ttft_ms": pct(ttfts, 50),
+    "p99_ttft_ms": pct(ttfts, 99),
+    "min_ttft_ms": ttfts[0] if ttfts else float('nan'),
+    "max_ttft_ms": ttfts[-1] if ttfts else float('nan'),
+}
+
+print(f"\nResults: {len(successes)}/{NUM_REQUESTS} ok, {len(failures)} failed")
+print(f"Duration:  {duration:.2f}s")
+print(f"Throughput: {output['request_throughput']:.2f} req/s")
+print(f"TTFT p50:   {output['median_ttft_ms']:.2f} ms")
+print(f"TTFT p99:   {output['p99_ttft_ms']:.2f} ms")
+print(f"TTFT mean:  {output['mean_ttft_ms']:.2f} ms")
+
+if OUTPUT_FILE:
+    with open(OUTPUT_FILE, 'w') as f:
+        json.dump(output, f)
+    print(f"Saved: {OUTPUT_FILE}")
+PYEOF
+
+export PEGAFLOW_SHARED_PREFIX="${SHARED_PREFIX}"
+
+# ============================================================================
+# Phase A: BASELINE — vLLM standalone (no PegaFlow)
+# ============================================================================
 echo ""
 echo "============================================================"
-echo " Phase B: PEGAFLOW (vllm + PegaKVConnector)"
+echo " Phase A: BASELINE (vLLM standalone)"
 echo "============================================================"
 
-echo "[4/8] Starting pegaflow-server..."
+echo "[A1] Starting vLLM..."
+wait_npu_memory 20000 120
+ASCEND_RT_VISIBLE_DEVICES="${NPU_DEVICE}" nohup "${PYTHON}" -m vllm.entrypoints.openai.api_server \
+  --model "${MODEL}" \
+  --port "${VLLM_PORT_1}" \
+  --max-model-len 1024 \
+  --gpu-memory-utilization 0.25 \
+  --enforce-eager \
+  > "${VLLM1_LOG}" 2>&1 &
+VLLM1_PID=$!
+disown ${VLLM1_PID} 2>/dev/null || true
+wait_for_vllm "${VLLM1_PID}" "${VLLM1_LOG}" "vLLM-baseline" "${VLLM_PORT_1}" || exit 1
+
+echo "[A2] Benchmark (${NUM_REQUESTS} req)..."
+BASELINE_OUT="${RESULTS_DIR}/baseline_serve.json"
+"${PYTHON}" "${BENCH_SCRIPT}" "${NUM_REQUESTS}" "${CONCURRENCY}" \
+  "http://127.0.0.1:${VLLM_PORT_1}" "${MODEL}" "${BASELINE_OUT}"
+
+kill_vllm_graceful "${VLLM1_PID}" "vLLM-baseline"
+wait_npu_memory 20000 120
+
+# ============================================================================
+# Start pegaflow-server (shared across both sessions)
+# ============================================================================
+echo ""
+echo "============================================================"
+echo " Starting pegaflow-server (shared across Sessions 1 & 2)"
+echo "============================================================"
+
+echo "[Server] Starting..."
 nohup "${CARGO_TARGET}/pegaflow-server-py" \
   --addr "127.0.0.1:${GRPC_PORT}" \
   --devices "${NPU_DEVICE}" \
@@ -226,114 +547,204 @@ nohup "${CARGO_TARGET}/pegaflow-server-py" \
   > "${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
 disown ${SERVER_PID} 2>/dev/null || true
+wait_for_server
 
+# ============================================================================
+# Session 1: vLLM + PegaFlow → FILL external cache
+# ============================================================================
+echo ""
+echo "============================================================"
+echo " Session 1: R1 FILL — vLLM + PegaFlow → D2H save"
+echo "============================================================"
+
+echo "[S1] Starting vLLM + PegaFlow..."
+wait_npu_memory 20000 120
+ASCEND_RT_VISIBLE_DEVICES="${NPU_DEVICE}" nohup "${PYTHON}" -m vllm.entrypoints.openai.api_server \
+  --model "${MODEL}" \
+  --port "${VLLM_PORT_1}" \
+  --max-model-len 1024 \
+  --gpu-memory-utilization 0.25 \
+  --enforce-eager \
+  --kv-transfer-config '{"kv_connector":"PegaKVConnector","kv_role":"kv_both","kv_connector_module_path":"pegaflow.connector","kv_connector_extra_config":{"pegaflow.port":'"${GRPC_PORT}"'}}' \
+  > "${VLLM1_LOG}" 2>&1 &
+VLLM1_PID=$!
+disown ${VLLM1_PID} 2>/dev/null || true
+wait_for_vllm "${VLLM1_PID}" "${VLLM1_LOG}" "vLLM-S1" "${VLLM_PORT_1}" || exit 1
+
+R1_SAVE_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_save_bytes_total")
+R1_LOAD_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_load_bytes_total")
+R1_BLOCKS_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_insertions")
+R1_HITS_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_hits_total")
+
+echo "[S1] Sending ${NUM_REQUESTS} requests → D2H save..."
+R1_OUT="${RESULTS_DIR}/r1_fill_serve.json"
+"${PYTHON}" "${BENCH_SCRIPT}" "${NUM_REQUESTS}" "${CONCURRENCY}" \
+  "http://127.0.0.1:${VLLM_PORT_1}" "${MODEL}" "${R1_OUT}"
+
+# Wait for async saves
+echo "  Waiting for async saves..."
 for i in $(seq 1 30); do
-  if health_check "http://127.0.0.1:9091/health"; then
-    echo "  Server ready (${i}s)"
+  INS=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_insertions")
+  if [ -n "${INS}" ] && [ "${INS}" -ge 1 ]; then
+    echo "    ${INS} blocks in cache (after ${i}s)"
     break
-  fi
-  if ! kill -0 ${SERVER_PID} 2>/dev/null; then
-    echo "  FAIL: Server crashed."; tail -20 "${SERVER_LOG}"; exit 1
   fi
   sleep 1
 done
 
-echo "[5/8] Starting vLLM (PegaFlow)..."
-KV_CONFIG=$(cat <<EOF
-{"kv_connector":"PegaKVConnector","kv_role":"kv_both","kv_connector_module_path":"pegaflow.connector","kv_connector_extra_config":{"pegaflow.port":${GRPC_PORT}}}
-EOF
-)
+R1_SAVE_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_save_bytes_total")
+R1_LOAD_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_load_bytes_total")
+R1_BLOCKS_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_insertions")
+R1_HITS_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_hits_total")
+R1_RESIDENT_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_resident_bytes")
 
-nohup "${PYTHON}" -m vllm.entrypoints.openai.api_server \
-  "${VLLM_BASE_ARGS[@]}" \
-  --kv-transfer-config "${KV_CONFIG}" \
-  > "${VLLM_LOG}" 2>&1 &
-VLLM_PID=$!
-disown ${VLLM_PID} 2>/dev/null || true
+echo "  R1 cache deltas:"
+echo "    save_bytes:      ${R1_SAVE_BEFORE} → ${R1_SAVE_AFTER}"
+echo "    load_bytes:      ${R1_LOAD_BEFORE} → ${R1_LOAD_AFTER}"
+echo "    blocks:           ${R1_BLOCKS_BEFORE} → ${R1_BLOCKS_AFTER}"
+echo "    resident_bytes:   ${R1_RESIDENT_AFTER}"
 
-for i in $(seq 1 180); do
-  if health_check "http://127.0.0.1:${VLLM_PORT}/health"; then
-    echo "  vLLM ready (${i}s)"
-    break
-  fi
-  if ! kill -0 ${VLLM_PID} 2>/dev/null; then
-    echo "  FAIL: vLLM crashed."; tail -30 "${VLLM_LOG}"; exit 1
-  fi
-  sleep 3
-done
+# ---- Shutdown vLLM-1 (keep server alive) ----
+echo ""
+echo "  Shutting down vLLM-S1..."
+kill_vllm_graceful "${VLLM1_PID}" "vLLM-S1"
 
-echo "  NPU free: $(npufree_mb) MB"
+# Verify cache survived
+echo "  Checking cache survived vLLM restart..."
+sleep 3
+RESTART_RESIDENT=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_resident_bytes")
+RESTART_BLOCKS=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_insertions")
+echo "    resident_bytes=${RESTART_RESIDENT} blocks=${RESTART_BLOCKS}"
 
-# Warmup round: fill PegaFlow cache
-echo "[6/8] Warmup round (filling PegaFlow cache)..."
-"${PYTHON}" -m vllm.entrypoints.cli.main bench serve \
-  --backend openai-chat \
-  --base-url "http://127.0.0.1:${VLLM_PORT}" \
-  --model "${MODEL}" \
-  --endpoint /v1/chat/completions \
-  --num-prompts $((NUM_PROMPTS / 2)) \
-  --max-concurrency "${CONCURRENCY}" \
-  2>&1 | tail -5
+# Wait for NPU memory to stabilize
+echo "  Waiting for NPU memory to stabilize..."
+wait_npu_memory 20000 120
 
-sleep 5
-
-# Collect pre-benchmark PegaFlow metrics
-PF_SAVE_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "save_bytes_total")
-PF_LOAD_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "load_bytes_total")
-PF_BLOCKS_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_insertions")
-
-echo "  Pre-benchmark PegaFlow state:"
-echo "    save_bytes_total=${PF_SAVE_BEFORE}"
-echo "    load_bytes_total=${PF_LOAD_BEFORE}"
-echo "    cache_blocks=${PF_BLOCKS_BEFORE}"
-
-# Run benchmark with PegaFlow
-echo "[7/8] Running PegaFlow benchmark..."
-PEGAFLOW_OUT="${RESULTS_DIR}/pegaflow_serve.json"
-"${PYTHON}" -m vllm.entrypoints.cli.main bench serve \
-  --backend openai-chat \
-  --base-url "http://127.0.0.1:${VLLM_PORT}" \
-  --model "${MODEL}" \
-  --endpoint /v1/chat/completions \
-  --num-prompts "${NUM_PROMPTS}" \
-  --max-concurrency "${CONCURRENCY}" \
-  --save-result \
-  --result-dir "${RESULTS_DIR}" \
-  --result-filename "$(basename "${PEGAFLOW_OUT}")" \
-  2>&1 | tee "${RESULTS_DIR}/pegaflow_bench.log"
-
-# Collect post-benchmark PegaFlow metrics
-PF_SAVE_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "save_bytes_total")
-PF_LOAD_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "load_bytes_total")
-PF_BLOCKS_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_insertions")
-PF_HITS=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_hits_total")
-PF_MISSES=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_misses_total")
-PEGAFLOW_NPU_AFTER=$(npufree_mb)
-
-echo "  Post-benchmark PegaFlow state:"
-echo "    save_bytes_total=${PF_SAVE_AFTER}"
-echo "    load_bytes_total=${PF_LOAD_AFTER}"
-echo "    cache_blocks=${PF_BLOCKS_AFTER}"
-echo "    hits=${PF_HITS}  misses=${PF_MISSES}"
-
-# ---------------------------------------------------------------------------
-# Phase C: Collect & compare results
-# ---------------------------------------------------------------------------
+# ============================================================================
+# Session 2: NEW vLLM + SAME pegaflow-server → H2D LOAD ★
+# ============================================================================
 echo ""
 echo "============================================================"
-echo " Phase C: Results Summary"
+echo " Session 2: R2 HIT — New vLLM (cold APC) → H2D load"
 echo "============================================================"
 
-echo "[8/8] Generating report..."
+echo "[S2] Starting new vLLM + PegaFlow..."
+wait_npu_memory 20000 120
+ASCEND_RT_VISIBLE_DEVICES="${NPU_DEVICE}" nohup "${PYTHON}" -m vllm.entrypoints.openai.api_server \
+  --model "${MODEL}" \
+  --port "${VLLM_PORT_2}" \
+  --max-model-len 1024 \
+  --gpu-memory-utilization 0.25 \
+  --enforce-eager \
+  --kv-transfer-config '{"kv_connector":"PegaKVConnector","kv_role":"kv_both","kv_connector_module_path":"pegaflow.connector","kv_connector_extra_config":{"pegaflow.port":'"${GRPC_PORT}"'}}' \
+  > "${VLLM2_LOG}" 2>&1 &
+VLLM2_PID=$!
+disown ${VLLM2_PID} 2>/dev/null || true
+wait_for_vllm "${VLLM2_PID}" "${VLLM2_LOG}" "vLLM-S2" "${VLLM_PORT_2}" || exit 1
+
+R2_SAVE_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_save_bytes_total")
+R2_LOAD_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_load_bytes_total")
+R2_BLOCKS_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_insertions")
+R2_HITS_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_hits_total")
+R2_MISSES_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_misses_total")
+
+echo "[S2] Sending ${NUM_REQUESTS} requests (SAME prompts → H2D load)..."
+R2_OUT="${RESULTS_DIR}/r2_hit_serve.json"
+"${PYTHON}" "${BENCH_SCRIPT}" "${NUM_REQUESTS}" "${CONCURRENCY}" \
+  "http://127.0.0.1:${VLLM_PORT_2}" "${MODEL}" "${R2_OUT}"
+
+sleep 3
+
+R2_SAVE_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_save_bytes_total")
+R2_LOAD_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_load_bytes_total")
+R2_BLOCKS_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_insertions")
+R2_HITS_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_hits_total")
+R2_MISSES_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_misses_total")
+
+# ---- S2 KV Transfer metrics ----
+echo ""
+echo "  S2 vLLM KV Transfer metrics:"
+"${PYTHON}" -c "
+import urllib.request
+r = urllib.request.urlopen('http://127.0.0.1:${VLLM_PORT_2}/metrics')
+for l in r.read().decode().split('\n'):
+    l = l.strip()
+    if 'vllm:kv_transfer' in l and not l.startswith('#'):
+        print(f'    {l}')
+    if 'external_prefix_cache' in l and not l.startswith('#'):
+        print(f'    {l}')
+" 2>&1
+
+# ---- S2 cache lookup logs ----
+echo ""
+echo "  S2 cache lookup log (first 10):"
+grep "cache_lookup" "${VLLM2_LOG}" 2>/dev/null | head -10 | while read -r line; do
+  echo "    ${line}"
+done
+
+echo ""
+echo "  R2 cache deltas (vs R2 start):"
+echo "    save_bytes:    ${R2_SAVE_BEFORE} → ${R2_SAVE_AFTER}"
+echo "    load_bytes:    ${R2_LOAD_BEFORE} → ${R2_LOAD_AFTER}"
+echo "    blocks:        ${R2_BLOCKS_BEFORE} → ${R2_BLOCKS_AFTER}"
+echo ""
+echo "  ★ R2 external hits:   $(( $(echo "${R2_HITS_AFTER:-0}" | tr -d '\n') - $(echo "${R2_HITS_BEFORE:-0}" | tr -d '\n') ))"
+echo "  ★ R2 external misses: $(( $(echo "${R2_MISSES_AFTER:-0}" | tr -d '\n') - $(echo "${R2_MISSES_BEFORE:-0}" | tr -d '\n') ))"
+echo "  ★ R2 H2D load_bytes:  $(( $(echo "${R2_LOAD_AFTER:-0}" | tr -d '\n') - $(echo "${R2_LOAD_BEFORE:-0}" | tr -d '\n') ))"
+
+# ---- PegaFlow final metrics ----
+echo ""
+echo "  PegaFlow final metrics:"
+"${PYTHON}" -c "
+import urllib.request
+r = urllib.request.urlopen('http://127.0.0.1:9091/metrics')
+for l in r.read().decode().split('\n'):
+    l = l.strip()
+    if 'rpc_requests_total' in l and not l.startswith('#'):
+        if 'method=\"save\"' in l or 'method=\"load\"' in l or 'method=\"register\"' in l:
+            print(f'    {l}')
+    if 'save_bytes_total' in l or 'load_bytes_total' in l and not l.startswith('#'):
+        print(f'    {l}')
+    if 'cache_block_insertions' in l or 'cache_block_hits' in l or 'cache_block_misses' in l:
+        if not l.startswith('#'):
+            print(f'    {l}')
+    if 'cache_resident_bytes' in l and not l.startswith('#'):
+        print(f'    {l}')
+" 2>&1
+
+# ---- Server prefetch logs ----
+echo ""
+echo "  PegaFlow prefetch (first 5 of each session):"
+grep "Prefetch local" "${SERVER_LOG}" 2>/dev/null | head -5 | while read -r line; do
+  echo "    ${line}"
+done
+echo "    ..."
+grep "Prefetch local" "${SERVER_LOG}" 2>/dev/null | tail -5 | while read -r line; do
+  echo "    ${line}"
+done
+
+# ---- Check for hits ----
+S2_HIT_COUNT=$(grep -c "hit_blocks=[1-9]" "${VLLM2_LOG}" 2>/dev/null || echo "0")
+echo ""
+echo "  ★ S2 requests with external cache hits: ${S2_HIT_COUNT}"
+
+cleanup_all
+sleep 2
+
+# ============================================================================
+# Report
+# ============================================================================
+echo ""
+echo "============================================================"
+echo " Results"
+echo "============================================================"
 
 REPORT="${RESULTS_DIR}/report.md"
 
 "${PYTHON}" -c "
-import json, os, sys
+import json, os
 
 results_dir = '${RESULTS_DIR}'
-baseline_file = os.path.join(results_dir, 'baseline_serve.json')
-pegaflow_file = os.path.join(results_dir, 'pegaflow_serve.json')
 
 def load_json(path):
     try:
@@ -342,95 +753,121 @@ def load_json(path):
     except (FileNotFoundError, json.JSONDecodeError) as e:
         return {'error': str(e)}
 
-baseline = load_json(baseline_file)
-pegaflow = load_json(pegaflow_file)
+baseline = load_json(os.path.join(results_dir, 'baseline_serve.json'))
+r1       = load_json(os.path.join(results_dir, 'r1_fill_serve.json'))
+r2       = load_json(os.path.join(results_dir, 'r2_hit_serve.json'))
 
-def safe_num(v, default=0.0):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
+def safe(v, default=0.0):
+    try: return float(v)
+    except: return default
+
+def delta(a, b):
+    return (a - b) / b * 100 if b > 0 else float('nan')
+
+# Metrics
+m = {}
+for k, val in [
+    ('r1_save_b', '${R1_SAVE_BEFORE:-0}'), ('r1_save_a', '${R1_SAVE_AFTER:-0}'),
+    ('r1_load_b', '${R1_LOAD_BEFORE:-0}'), ('r1_load_a', '${R1_LOAD_AFTER:-0}'),
+    ('r1_blk_b', '${R1_BLOCKS_BEFORE:-0}'), ('r1_blk_a', '${R1_BLOCKS_AFTER:-0}'),
+    ('r1_res_a', '${R1_RESIDENT_AFTER:-0}'),
+    ('r2_save_b', '${R2_SAVE_BEFORE:-0}'), ('r2_save_a', '${R2_SAVE_AFTER:-0}'),
+    ('r2_load_b', '${R2_LOAD_BEFORE:-0}'), ('r2_load_a', '${R2_LOAD_AFTER:-0}'),
+    ('r2_blk_b', '${R2_BLOCKS_BEFORE:-0}'), ('r2_blk_a', '${R2_BLOCKS_AFTER:-0}'),
+    ('r2_hits_b', '${R2_HITS_BEFORE:-0}'), ('r2_hits_a', '${R2_HITS_AFTER:-0}'),
+    ('r2_misses_b', '${R2_MISSES_BEFORE:-0}'), ('r2_misses_a', '${R2_MISSES_AFTER:-0}'),
+]:
+    m[k] = safe(val)
+
+r1_save     = m['r1_save_a'] - m['r1_save_b']
+r1_blocks   = m['r1_blk_a'] - m['r1_blk_b']
+r2_save     = m['r2_save_a'] - m['r2_save_b']
+r2_load     = m['r2_load_a'] - m['r2_load_b']
+r2_blocks   = m['r2_blk_a'] - m['r2_blk_b']
+r2_hits     = m['r2_hits_a'] - m['r2_hits_b']
+r2_misses   = m['r2_misses_a'] - m['r2_misses_b']
+
+external_hit = r2_hits > 0
+h2d_load     = r2_load > 0
 
 lines = []
-lines.append('# PegaFlow Prefix-Caching Benchmark Report')
+lines.append('# PegaFlow Benchmark Report')
 lines.append('')
-lines.append(f'**Tag:** ${TAG}  ')
-lines.append(f'**Model:** Qwen2.5-0.5B-Instruct  ')
-lines.append(f'**Prompts:** ${NUM_PROMPTS}  ')
-lines.append(f'**Input/Output len:** ${INPUT_LEN}/${OUTPUT_LEN}  ')
-lines.append(f'**Concurrency:** ${CONCURRENCY}  ')
+lines.append(f'**Tag:** ${TAG}')
+lines.append(f'**Model:** ${MODEL_NAME}')
+lines.append(f'**Requests:** ${NUM_REQUESTS} per session | **Concurrency:** ${CONCURRENCY}')
+lines.append('')
+lines.append('**Strategy:** Session 1 saves KV blocks to pegaflow-server.')
+lines.append('Session 2 starts a fresh vLLM (cold internal APC) and sends the SAME')
+lines.append('prompts. Since token sequences are identical, block hashes match and')
+lines.append('the external cache should deliver HITS.')
 lines.append('')
 
-# TTFT / Throughput comparison
-lines.append('## vLLM Serving Performance')
+# Performance
+lines.append('## Serving Performance')
 lines.append('')
-lines.append('| Metric | Baseline | PegaFlow | Delta |')
-lines.append('|--------|----------|----------|-------|')
+lines.append('| Metric | Baseline | R1 (fill) | R2 (hit) | R1 vs Base | R2 vs Base | R2 vs R1 |')
+lines.append('|--------|----------|-----------|----------|------------|------------|----------|')
 
-for metric_key, label in [
+for key, label in [
     ('mean_ttft_ms', 'TTFT mean (ms)'),
     ('median_ttft_ms', 'TTFT p50 (ms)'),
     ('p99_ttft_ms', 'TTFT p99 (ms)'),
-    ('mean_tpot_ms', 'TPOT mean (ms)'),
-    ('median_tpot_ms', 'TPOT median (ms)'),
     ('request_throughput', 'Throughput (req/s)'),
     ('output_throughput', 'Output TPS'),
 ]:
-    b_val = safe_num(baseline.get(metric_key)) if isinstance(baseline, dict) else 0.0
-    p_val = safe_num(pegaflow.get(metric_key)) if isinstance(pegaflow, dict) else 0.0
-    if b_val > 0:
-        delta_pct = (p_val - b_val) / b_val * 100
-    else:
-        delta_pct = float('nan')
-    lines.append(f'| {label} | {b_val:.2f} | {p_val:.2f} | {delta_pct:+.1f}% |')
+    b  = safe(baseline.get(key)) if isinstance(baseline, dict) else 0.0
+    r1v = safe(r1.get(key))       if isinstance(r1, dict)       else 0.0
+    r2v = safe(r2.get(key))       if isinstance(r2, dict)       else 0.0
+    lines.append(f'| {label} | {b:.2f} | {r1v:.2f} | {r2v:.2f} | {delta(r1v,b):+.1f}% | {delta(r2v,b):+.1f}% | {delta(r2v,r1v):+.1f}% |')
 
 lines.append('')
 
 # PegaFlow metrics
-lines.append('## PegaFlow KV Cache Metrics')
+lines.append('## PegaFlow KV Cache')
 lines.append('')
-save_delta = safe_num(${PF_SAVE_AFTER}) - safe_num(${PF_SAVE_BEFORE})
-load_delta = safe_num(${PF_LOAD_AFTER}) - safe_num(${PF_LOAD_BEFORE})
-blocks_delta = safe_num(${PF_BLOCKS_AFTER}) - safe_num(${PF_BLOCKS_BEFORE})
-
-lines.append('| Metric | Before | After | Delta |')
-lines.append('|--------|--------|-------|-------|')
-lines.append(f'| save_bytes_total | ${PF_SAVE_BEFORE} | ${PF_SAVE_AFTER} | {save_delta} |')
-lines.append(f'| load_bytes_total | ${PF_LOAD_BEFORE} | ${PF_LOAD_AFTER} | {load_delta} |')
-lines.append(f'| cache_blocks | ${PF_BLOCKS_BEFORE} | ${PF_BLOCKS_AFTER} | {blocks_delta} |')
-lines.append(f'| cache_hits_total | — | ${PF_HITS} | — |')
-lines.append(f'| cache_misses_total | — | ${PF_MISSES} | — |')
+lines.append('| Metric | R1 (fill) Δ | R2 (hit) Δ | Meaning |')
+lines.append('|--------|-------------|------------|---------|')
+lines.append(f'| save_bytes | {r1_save:.0f} | {r2_save:.0f} | D2H written |')
+lines.append(f'| load_bytes | — | {r2_load:.0f} | H2D read ★ |')
+lines.append(f'| blocks inserted | {r1_blocks:.0f} | {r2_blocks:.0f} | Blocks cached |')
+lines.append(f'| cache_hits | — | {r2_hits:.0f} | External hits ★ |')
+lines.append(f'| cache_misses | — | {r2_misses:.0f} | External misses |')
 lines.append('')
 
-# NPU memory
-lines.append('## NPU Memory')
+# Interpretation
+lines.append('## Interpretation')
 lines.append('')
-lines.append('| Phase | Free (MB) |')
-lines.append('|-------|-----------|')
-lines.append(f'| Baseline (after) | ${BASELINE_NPU_AFTER} |')
-lines.append(f'| PegaFlow (after) | ${PEGAFLOW_NPU_AFTER} |')
-lines.append('')
+lines.append('| Question | Answer |')
+lines.append('|----------|--------|')
+lines.append(f'| R2 external cache_hits > 0? | {\"✅ YES — HIT path works!\" if external_hit else \"❌ NO — blocks not found\"} |')
+lines.append(f'| R2 load_bytes > 0? | {\"✅ YES — H2D DMA occurred\" if h2d_load else \"❌ NO — no H2D load\"} |')
+if external_hit:
+    lines.append(f'| R2 p50 vs Baseline? | {\"✅ YES — PegaFlow beats native\" if safe(r2.get(\"median_ttft_ms\")) < safe(baseline.get(\"median_ttft_ms\")) else \"No — external hit but still slower\"} |')
+else:
+    lines.append('| R2 p50 < R1 p50? | {} |'.format(
+        \"✅ YES\" if safe(r2.get(\"median_ttft_ms\")) < safe(r1.get(\"median_ttft_ms\")) else \"No\"
+    ))
 
-# Raw metrics files
-lines.append('## Raw Output Files')
-lines.append('')
-for name in ['baseline_serve.json', 'pegaflow_serve.json',
-             'baseline_bench.log', 'pegaflow_bench.log']:
-    lines.append(f'- `{name}`')
-lines.append('')
+if not external_hit:
+    lines.append('')
+    lines.append('**Possible root causes:**')
+    lines.append('1. Block hashes differ between Session 1 and 2 (extra_keys include cache_salt?)')
+    lines.append('2. Saved blocks were evicted from the 2 GiB pinned memory pool')
+    lines.append('3. Session cleanup evicted blocks from ReadCache')
+    lines.append('4. The Python benchmark script generates different prompts across runs')
 
 report = '\n'.join(lines)
 print(report)
 with open('${REPORT}', 'w') as f:
     f.write(report)
-print(f'Report written to ${REPORT}')
-" 2>&1
+print(f'\nReport: ${REPORT}')
+"
 
 echo ""
 echo "============================================================"
-echo " Benchmark Complete: ${TAG}"
-echo " Results: ${RESULTS_DIR}"
-echo " Report:  ${REPORT}"
-echo " Server log: ${SERVER_LOG}"
-echo " vLLM log:   ${VLLM_LOG}"
+echo " Complete: ${TAG}"
+echo " Results:  ${RESULTS_DIR}"
+echo " Report:   ${REPORT}"
+echo " Logs:     ${SERVER_LOG} / ${VLLM1_LOG} / ${VLLM2_LOG}"
 echo "============================================================"

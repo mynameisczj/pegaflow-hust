@@ -155,7 +155,7 @@ echo "  S1: Sending request to populate cache..."
 import urllib.request, json
 data = json.dumps({
     'model': '${MODEL}',
-    'messages': [{'role': 'user', 'content': '${SHARED}. What are the major rivers in each country?'}],
+    'messages': [{'role': 'user', 'content': '${SHARED}. What are the major rivers 21in each country?'}],
     'max_tokens': 32
 }).encode()
 req = urllib.request.Request('http://127.0.0.1:${VLLM_PORT_1}/v1/chat/completions',
