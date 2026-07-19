@@ -63,6 +63,10 @@ harness = false
 name = "transfer_h2d"
 harness = false
 
+[[bench]]
+name = "ascend_transfer"
+harness = false
+
 [[example]]
 name = "pinned_alloc"
 

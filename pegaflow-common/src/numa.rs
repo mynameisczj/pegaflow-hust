@@ -260,39 +260,70 @@ where
 // Device NUMA affinity — npu-smi (Ascend NPU)
 // ============================================================================
 
-/// Discover NPU device count via `npu-smi info -t board`.
+/// Discover NPU device count via `npu-smi info -m`.
 ///
-/// Parses the output to count how many NPU chips are present.
-/// Falls back to counting `/sys/class/davinci/davinci*` entries
-/// if `npu-smi` is not available.
+/// Parses the device listing to count unique Ascend NPU chips (skipping MCU
+/// companion chips). Falls back to counting `/dev/davinci*` entries (or the
+/// container-equivalent `/sys/devices/virtual/devdrv-class/davinci*`) if
+/// `npu-smi` is not available.
 ///
 /// This function is public so that integration tests can verify
 /// NPU detection and NUMA affinity parsing without linking against
 /// the CANN runtime.
 pub fn get_npu_device_count() -> Option<u32> {
-    // Primary: use npu-smi
+    // Primary: use npu-smi -m to list all devices
     if let Ok(output) = Command::new("npu-smi")
-        .args(["info", "-t", "board", "-c", "0"])
+        .args(["info", "-m"])
         .output()
         && output.status.success()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        // npu-smi info -t board outputs lines with chip/device info.
-        // Count lines that look like "NPU ID" / "Chip ID" entries.
+        // Count unique NPU IDs (skip MCU chips with Chip Logic ID = "-").
+        let mut count = 0u32;
         for line in stdout.lines() {
             let trimmed = line.trim();
-            if (trimmed.starts_with("Count") || trimmed.starts_with("Chip Count"))
-                && let Some(val) = trimmed.split(':').nth(1)
-                && let Ok(count) = val.trim().parse::<u32>()
+            // Only count lines that have a numeric Chip Logic ID (not "-" for MCU).
+            if trimmed.starts_with(|c: char| c.is_ascii_digit())
+                && trimmed.contains("Ascend")
             {
-                return Some(count);
+                count += 1;
             }
+        }
+        if count > 0 {
+            return Some(count);
         }
     }
 
-    // Fallback: count /sys/class/davinci devices
-    if let Ok(entries) = fs::read_dir("/sys/class/davinci") {
-        let count = entries.filter_map(|e| e.ok()).count();
+    // Fallback 1: count /dev/davinci devices (container with device nodes)
+    match fs::read_dir("/dev") {
+        Ok(entries) => {
+            let count = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_name()
+                        .to_str()
+                        .map(|n| n.starts_with("davinci") && n != "davinci_manager")
+                        .unwrap_or(false)
+                })
+                .count();
+            if count > 0 {
+                return Some(count as u32);
+            }
+        }
+        Err(_) => {}
+    }
+
+    // Fallback 2: count virtual devdrv-class entries (container without /dev access)
+    if let Ok(entries) = fs::read_dir("/sys/devices/virtual/devdrv-class") {
+        let count = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map(|n| n.starts_with("davinci") && n != "davinci_manager")
+                    .unwrap_or(false)
+            })
+            .count();
         if count > 0 {
             return Some(count as u32);
         }
@@ -305,36 +336,63 @@ pub fn get_npu_device_count() -> Option<u32> {
 ///
 /// Strategy (ordered by preference):
 /// 1. Read `/sys/class/davinci/davinci{device_id}/device/numa_node`
+///    or `/sys/devices/virtual/devdrv-class/davinci{device_id}/device/numa_node`
 ///    (most reliable, direct kernel interface).
-/// 2. Parse `npu-smi info -t topo -i {device_id}` output.
+/// 2. Parse `npu-smi info -t topo -i {device_id}` output:
+///    - "CPU Affinity" column → map first CPU to NUMA node via
+///      `/sys/devices/system/cpu/cpu{id}/node` symlink.
+///    - Legacy "NUMA Node: N" or "numa_node: N" lines.
 ///
 /// Returns `NumaNode::UNKNOWN` if all methods fail.
 ///
 /// This function is public so that integration tests can verify
 /// NUMA node assignment for Ascend NPUs.
 pub fn get_npu_numa_node(device_id: u32) -> NumaNode {
-    // Method 1: sysfs (fastest, most reliable, no external binary needed)
-    let numa_node_path = format!("/sys/class/davinci/davinci{device_id}/device/numa_node");
-    if let Ok(content) = fs::read_to_string(&numa_node_path)
-        && let Ok(node) = content.trim().parse::<i32>()
-        && node >= 0
-    {
-        return NumaNode(node as u32);
+    // Method 1: sysfs numa_node files.
+    // Container environments may use a virtual devdrv-class path instead of
+    // the standard /sys/class/davinci layout.
+    for candidate in [
+        format!("/sys/class/davinci/davinci{device_id}/device/numa_node"),
+        format!("/sys/devices/virtual/devdrv-class/davinci{device_id}/device/numa_node"),
+    ] {
+        if let Ok(content) = fs::read_to_string(&candidate)
+            && let Ok(node) = content.trim().parse::<i32>()
+            && node >= 0
+        {
+            return NumaNode(node as u32);
+        }
     }
 
-    // Method 2: npu-smi topology query
+    // Method 2: npu-smi topology query.
+    // The output is a table with "NPU{n}" rows and a "CPU Affinity" column
+    // on the far right. Find the row that starts with "NPU{device_id}" and
+    // extract the last whitespace-separated field (the CPU range).
     if let Ok(output) = Command::new("npu-smi")
         .args(["info", "-t", "topo", "-i", &device_id.to_string()])
         .output()
         && output.status.success()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        // npu-smi topo output may contain NUMA affinity info.
-        // Look for lines like "NUMA Node: 1" or "numa_node: 1".
+
+        // Look for the row matching "NPU{device_id}" (e.g. "NPU0").
+        let marker = format!("NPU{device_id}");
         for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with(&marker) {
+                // The last whitespace-separated field is the CPU Affinity
+                // value, e.g. "144-167". Extract the first CPU and map to
+                // NUMA node.
+                if let Some(last_field) = trimmed.split_whitespace().last()
+                    && let Some(first_cpu) = parse_first_int(last_field)
+                    && let Some(node) = cpu_to_numa_node(first_cpu)
+                {
+                    return node;
+                }
+            }
+
+            // Legacy fallback: "NUMA Node: N" or "numa_node: N" lines.
             let lower = line.to_lowercase();
             if lower.contains("numa") && lower.contains("node") {
-                // Try to extract the first number from this line.
                 if let Some(node) = parse_first_int(line) {
                     return NumaNode(node);
                 }
@@ -343,6 +401,27 @@ pub fn get_npu_numa_node(device_id: u32) -> NumaNode {
     }
 
     NumaNode::UNKNOWN
+}
+
+/// Map a logical CPU number to its NUMA node via sysfs.
+///
+/// Reads `/sys/devices/system/cpu/cpu{id}/` and looks for a symlink
+/// named `node{N}` (e.g. `node6`). Returns the `N` as a `NumaNode`.
+///
+/// Returns `None` if the directory is missing or no `node*` entry exists.
+fn cpu_to_numa_node(cpu: u32) -> Option<NumaNode> {
+    let cpu_dir = format!("/sys/devices/system/cpu/cpu{cpu}");
+    let entries = fs::read_dir(&cpu_dir).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_str().unwrap_or("");
+        if let Some(suffix) = name.strip_prefix("node")
+            && let Ok(node_id) = suffix.parse::<u32>()
+        {
+            return Some(NumaNode(node_id));
+        }
+    }
+    None
 }
 
 /// Extract the first unsigned integer from a string.

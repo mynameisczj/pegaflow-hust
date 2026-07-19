@@ -13,6 +13,10 @@
 
 set -euo pipefail
 
+# Ascend aclrtMallocHost requires locked memory for DMA-pinned allocations.
+# Container defaults may cap this at 64KB; raise it before starting.
+ulimit -l unlimited
+
 NPU_DEVICE="${1:-2}"
 GRPC_PORT=50059
 VLLM_PORT_1=8101
@@ -102,7 +106,6 @@ nohup "${CARGO_TARGET}/pegaflow-server-py" \
   --addr "127.0.0.1:${GRPC_PORT}" \
   --devices "${NPU_DEVICE}" \
   --pool-size 2gb \
-  --disable-numa-affinity \
   > "${SERVER_LOG}" 2>&1 &
 SERVER_PID=$!
 disown ${SERVER_PID} 2>/dev/null || true
