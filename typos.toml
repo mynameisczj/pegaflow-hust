@@ -3,3 +3,5 @@
 consts = "consts"
 # Huawei Ascend Compute Architecture for Neural Networks
 CANN = "CANN"
+# Currency of Kyrgyzstan and Uzbekistan
+Som = "Som"
