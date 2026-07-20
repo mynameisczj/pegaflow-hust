@@ -41,7 +41,7 @@ MAX_TOKENS=150
 # Long shared prefix (>256 tokens = 2+ full blocks at block_size=128).
 # run_load_e2e.sh uses a similar pattern — this guarantees at least 2
 # full blocks are pure shared content.
-SHARED_PREFIX="The capital of France is Paris. The capital of Germany is Berlin. The capital of Italy is Rome. The capital of Spain is Madrid. The capital of Portugal is Lisbon. The capital of Japan is Tokyo. The capital of China is Beijing. The capital of India is New Delhi. The capital of Brazil is Brasilia. The capital of Canada is Ottawa. The capital of Australia is Canberra. The capital of Russia is Moscow. The capital of Egypt is Cairo. The capital of South Korea is Seoul. The capital of Mexico is Mexico City. The capital of Argentina is Buenos Aires. The capital of Turkey is Ankara. The capital of Indonesia is Jakarta. The capital of Nigeria is Abuja. The capital of Kenya is Nairobi. The capital of South Africa is Pretoria. The capital of Sweden is Stockholm. The capital of Norway is Oslo. The capital of Denmark is Copenhagen. The capital of Finland is Helsinki. The capital of Poland is Warsaw. The capital of Ukraine is Kyiv. The capital of Greece is Athens. The capital of Thailand is Bangkok. The capital of Vietnam is Hanoi. The capital of Malaysia is Kuala Lumpur. The capital of Philippines is Manila. The capital of Iran is Tehran. The capital of Iraq is Baghdad. The capital of Saudi Arabia is Riyadh. The capital of Chile is Santiago. The capital of Peru is Lima."
+SHARED_PREFIX="Here is a comprehensive list of all countries with their capitals, continents, languages, populations, and currencies: Afghanistan Kabul Asia Dari Pashto 41M Afghani; Albania Tirana Europe Albanian 2.8M Lek; Algeria Algiers Africa Arabic Berber 44M Dinar; Andorra Andorra la Vella Europe Catalan 79000 Euro; Angola Luanda Africa Portuguese 35M Kwanza; Argentina Buenos Aires South America Spanish 46M Peso; Armenia Yerevan Asia Armenian 2.8M Dram; Australia Canberra Oceania English 26M Dollar; Austria Vienna Europe German 9M Euro; Azerbaijan Baku Asia Azerbaijani 10M Manat; Bahamas Nassau North America English 400000 Dollar; Bahrain Manama Asia Arabic 1.5M Dinar; Bangladesh Dhaka Asia Bengali 170M Taka; Barbados Bridgetown North America English 280000 Dollar; Belarus Minsk Europe Belarusian Russian 9.2M Ruble; Belgium Brussels Europe Dutch French German 11.7M Euro; Belize Belmopan North America English 410000 Dollar; Benin Porto-Novo Africa French 13M Franc; Bhutan Thimphu Asia Dzongkha 780000 Ngultrum; Bolivia Sucre South America Spanish Quechua Aymara 12M Boliviano; Bosnia Herzegovina Sarajevo Europe Bosnian Croatian Serbian 3.2M Marka; Botswana Gaborone Africa English Tswana 2.6M Pula; Brazil Brasilia South America Portuguese 215M Real; Brunei Bandar Seri Begawan Asia Malay 450000 Dollar; Bulgaria Sofia Europe Bulgarian 6.5M Lev; Burkina Faso Ouagadougou Africa French 23M Franc; Burundi Gitega Africa Kirundi French 13M Franc; Cabo Verde Praia Africa Portuguese 590000 Escudo; Cambodia Phnom Penh Asia Khmer 17M Riel; Cameroon Yaounde Africa French English 28M Franc; Canada Ottawa North America English French 39M Dollar; Chile Santiago South America Spanish 19.5M Peso; China Beijing Asia Mandarin 1412M Yuan Renminbi; Colombia Bogota South America Spanish 52M Peso; Congo Kinshasa Africa French 100M Franc; Costa Rica San Jose North America Spanish 5.2M Colon; Croatia Zagreb Europe Croatian 3.9M Euro; Cuba Havana North America Spanish 11M Peso; Cyprus Nicosia Asia Greek Turkish 1.2M Euro; Czech Republic Prague Europe Czech 10.7M Koruna; Denmark Copenhagen Europe Danish 5.9M Krone; Djibouti Djibouti City Africa French Arabic 1.1M Franc; Ecuador Quito South America Spanish 18M Dollar; Egypt Cairo Africa Arabic 110M Pound; Estonia Tallinn Europe Estonian 1.3M Euro; Ethiopia Addis Ababa Africa Amharic 125M Birr; Fiji Suva Oceania English Fijian Hindi 930000 Dollar; Finland Helsinki Europe Finnish Swedish 5.6M Euro; France Paris Europe French 68M Euro; Gabon Libreville Africa French 2.4M Franc; Gambia Banjul Africa English 2.6M Dalasi; Georgia Tbilisi Asia Georgian 3.7M Lari; Germany Berlin Europe German 84M Euro; Ghana Accra Africa English 33M Cedi; Greece Athens Europe Greek 10.4M Euro; Guatemala Guatemala City North America Spanish 17M Quetzal; Guinea Conakry Africa French 13M Franc; Haiti Port-au-Prince North America Haitian Creole French 11.5M Gourde; Honduras Tegucigalpa North America Spanish 10M Lempira; Hungary Budapest Europe Hungarian 9.6M Forint; Iceland Reykjavik Europe Icelandic 380000 Krona; India New Delhi Asia Hindi English 1400M Rupee; Indonesia Jakarta Asia Indonesian 275M Rupiah; Iran Tehran Asia Persian 88M Rial; Iraq Baghdad Asia Arabic Kurdish 43M Dinar; Ireland Dublin Europe Irish English 5.1M Euro; Israel Jerusalem Asia Hebrew Arabic 9.5M Shekel; Italy Rome Europe Italian 59M Euro; Jamaica Kingston North America English 2.8M Dollar; Japan Tokyo Asia Japanese 125M Yen; Jordan Amman Asia Arabic 11M Dinar; Kazakhstan Astana Asia Kazakh Russian 19M Tenge; Kenya Nairobi Africa Swahili English 55M Shilling; Kuwait Kuwait City Asia Arabic 4.3M Dinar; Kyrgyzstan Bishkek Asia Kyrgyz Russian 6.7M Som; Laos Vientiane Asia Lao 7.5M Kip; Latvia Riga Europe Latvian 1.8M Euro; Lebanon Beirut Asia Arabic French 5.5M Pound; Libya Tripoli Africa Arabic 6.7M Dinar; Lithuania Vilnius Europe Lithuanian 2.8M Euro; Luxembourg Luxembourg City Europe Luxembourgish French German 650000 Euro; Madagascar Antananarivo Africa Malagasy French 29M Ariary; Malaysia Kuala Lumpur Asia Malay 34M Ringgit; Maldives Male Asia Dhivehi 520000 Rufiyaa; Mali Bamako Africa French 22M Franc; Malta Valletta Europe Maltese English 530000 Euro; Mexico Mexico City North America Spanish 128M Peso; Moldova Chisinau Europe Romanian 2.5M Leu; Monaco Monaco Europe French 36000 Euro; Mongolia Ulaanbaatar Asia Mongolian 3.4M Tugrik; Morocco Rabat Africa Arabic Berber 37M Dirham; Mozambique Maputo Africa Portuguese 33M Metical; Myanmar Naypyidaw Asia Burmese 54M Kyat; Namibia Windhoek Africa English 2.5M Dollar; Nepal Kathmandu Asia Nepali 30M Rupee; Netherlands Amsterdam Europe Dutch 17.7M Euro; New Zealand Wellington Oceania English Maori 5.2M Dollar; Nicaragua Managua North America Spanish 6.8M Cordoba; Niger Niamey Africa French 26M Franc; Nigeria Abuja Africa English 220M Naira; North Korea Pyongyang Asia Korean 26M Won; Norway Oslo Europe Norwegian 5.5M Krone; Oman Muscat Asia Arabic 4.6M Rial; Pakistan Islamabad Asia Urdu English 235M Rupee; Panama Panama City North America Spanish 4.4M Balboa; Paraguay Asuncion South America Spanish Guarani 6.7M Guarani; Peru Lima South America Spanish Quechua Aymara 34M Sol; Philippines Manila Asia Filipino English 115M Peso; Poland Warsaw Europe Polish 37M Zloty; Portugal Lisbon Europe Portuguese 10.3M Euro; Qatar Doha Asia Arabic 2.7M Riyal; Romania Bucharest Europe Romanian 19M Leu; Russia Moscow Europe Asia Russian 144M Ruble; Rwanda Kigali Africa Kinyarwanda French English 13.5M Franc; Saudi Arabia Riyadh Asia Arabic 36M Riyal; Senegal Dakar Africa French 17M Franc; Serbia Belgrade Europe Serbian 6.7M Dinar; Singapore Singapore Asia English Malay Mandarin Tamil 5.6M Dollar; Slovakia Bratislava Europe Slovak 5.4M Euro; Slovenia Ljubljana Europe Slovenian 2.1M Euro; Somalia Mogadishu Africa Somali Arabic 17M Shilling; South Africa Pretoria Africa 11 official languages 60M Rand; South Korea Seoul Asia Korean 52M Won; Spain Madrid Europe Spanish 47M Euro; Sri Lanka Colombo Asia Sinhala Tamil 22M Rupee; Sudan Khartoum Africa Arabic English 47M Pound; Sweden Stockholm Europe Swedish 10.5M Krona; Switzerland Bern Europe German French Italian Romansh 8.8M Franc; Syria Damascus Asia Arabic 22M Pound; Taiwan Taipei Asia Mandarin 23.5M Dollar; Tajikistan Dushanbe Asia Tajik 9.7M Somoni; Tanzania Dodoma Africa Swahili English 65M Shilling; Thailand Bangkok Asia Thai 72M Baht; Togo Lome Africa French 8.8M Franc; Tunisia Tunis Africa Arabic 12M Dinar; Turkey Ankara Asia Europe Turkish 85M Lira; Turkmenistan Ashgabat Asia Turkmen 6.3M Manat; Uganda Kampala Africa English Swahili 48M Shilling; Ukraine Kyiv Europe Ukrainian 38M Hryvnia; United Arab Emirates Abu Dhabi Asia Arabic 9.4M Dirham; United Kingdom London Europe English 67M Pound Sterling; United States Washington DC North America English 335M Dollar; Uruguay Montevideo South America Spanish 3.4M Peso; Uzbekistan Tashkent Asia Uzbek 35M Som; Venezuela Caracas South America Spanish 28M Bolivar; Vietnam Hanoi Asia Vietnamese 100M Dong; Yemen Sanaa Asia Arabic 34M Rial; Zambia Lusaka Africa English 20M Kwacha; Zimbabwe Harare Africa 16 official languages 16M Dollar."
 
 # Unique suffixes — same across sessions so block_hashes match.
 SUFFIXES=(
@@ -88,13 +88,15 @@ ${ASCEND_HOME}/lib64:\
 ${ASCEND_HOME}/aarch64-linux/lib64:\
 ${ASCEND_DRIVER}:\
 ${ATB_LIB}"
-# ASCEND_RT_VISIBLE_DEVICES is set per-vLLM-command below.
+# Device visibility: pegaflow-server uses --devices directly.
+# For vLLM processes, ASCEND_RT_VISIBLE_DEVICES is set per-command
+# to avoid interference with pegaflow-server's physical device IDs.
+# ASCEND_VISIBLE_DEVICES is set for ASCEND ACL compatibility.
+export ASCEND_VISIBLE_DEVICES="${NPU_DEVICE}"
 export VLLM_PLUGINS=ascend
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
+export VLLM_LOGGING_LEVEL=DEBUG
 export PYTHONHASHSEED=0
-# ASCEND_RT_VISIBLE_DEVICES is set per-command for vLLM only.
-# pegaflow-server manages its own devices via --devices (physical IDs)
-# and does NOT support device remapping.
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -130,7 +132,24 @@ wait_for_vllm() {
   local pid="$1" log="$2" label="$3" port="$4" timeout="${5:-240}"
   for i in $(seq 1 "${timeout}"); do
     if health_check "http://127.0.0.1:${port}/health"; then
-      echo "  ${label} ready (${i}s)"; return 0
+      # If health check passes in the first 3 seconds, the vLLM didn't start
+      # from scratch — something else was already listening on this port.
+      if [ "${i}" -le 2 ]; then
+        local port_pid
+        port_pid=$(ss -tlnp "sport = :${port}" 2>/dev/null | grep -oP 'pid=\K\d+' | head -1 || true)
+        if [ -n "${port_pid}" ] && [ "${port_pid}" != "${pid}" ]; then
+          echo "  WARNING: Port ${port} served by PID ${port_pid}, not our PID ${pid}!"
+          echo "  A stale vLLM is occupying this port. Killing it..."
+          kill -9 "${port_pid}" 2>/dev/null || true
+          sleep 2
+          continue
+        fi
+        # If PID matches but startup was very fast, note it but accept.
+        echo "  ${label} ready (${i}s — fast, PID ${pid} confirmed on port)"
+      else
+        echo "  ${label} ready (${i}s)"
+      fi
+      return 0
     fi
     if ! kill -0 ${pid} 2>/dev/null; then
       echo "  FAIL: ${label} crashed."
@@ -156,23 +175,52 @@ wait_for_server() {
 }
 
 kill_vllm_graceful() {
-  local pid="$1" label="$2"
-  echo "  Shutting down ${label}..."
-  kill ${pid} 2>/dev/null || true
-  for i in $(seq 1 120); do
-    if ! kill -0 ${pid} 2>/dev/null; then
-      echo "  ${label} exited gracefully (${i}s)"
+  local pid="$1" label="$2" port="$3"
+  echo "  Shutting down ${label} (PID=${pid}, port=${port})..."
+
+  # Step 1: Find ALL descendants BEFORE killing the parent.
+  # Once the parent dies, children are reparented to init and pkill -P won't find them.
+  local all_pids="${pid}"
+  local child_pids
+  child_pids=$(pgrep -P "${pid}" 2>/dev/null || true)
+  for cp in ${child_pids}; do
+    all_pids="${all_pids} ${cp}"
+    # Also find grandchildren (EngineCore may spawn its own children)
+    local grandchild
+    grandchild=$(pgrep -P "${cp}" 2>/dev/null || true)
+    for gc in ${grandchild}; do
+      all_pids="${all_pids} ${gc}"
+    done
+  done
+
+  # Step 2: SIGKILL all descendants first, then the parent.
+  # Use SIGKILL directly — SIGTERM on vLLM often leaves EngineCore alive.
+  echo "  Killing ${label} process tree: ${all_pids}"
+  for p in ${all_pids}; do
+    kill -9 ${p} 2>/dev/null || true
+  done
+  sleep 2
+
+  # Step 3: Verify the port is actually free.
+  for i in $(seq 1 30); do
+    if ss -tlnp "sport = :${port}" 2>/dev/null | grep -q "pid="; then
+      sleep 1
+    else
+      echo "  Port ${port} free (${i}s)"
       break
     fi
-    sleep 1
   done
-  if kill -0 ${pid} 2>/dev/null; then
-    echo "  ${label} did not exit, force-killing..."
-    kill -9 ${pid} 2>/dev/null || true
+  if ss -tlnp "sport = :${port}" 2>/dev/null | grep -q "pid="; then
+    echo "  WARNING: Port ${port} still occupied after killing process tree!"
+    local stale_pid
+    stale_pid=$(ss -tlnp "sport = :${port}" 2>/dev/null | grep -oP 'pid=\K\d+' | head -1 || true)
+    if [ -n "${stale_pid}" ]; then
+      echo "  Killing stale PID ${stale_pid} on port ${port}..."
+      kill -9 "${stale_pid}" 2>/dev/null || true
+      sleep 2
+    fi
   fi
-  wait ${pid} 2>/dev/null || true
-  pkill -9 -f "EngineCore" 2>/dev/null || true
-  pkill -9 -f "multiprocessing.resource_tracker" 2>/dev/null || true
+
   echo "  Waiting for NPU memory recovery..."
   sleep 15
 }
@@ -314,27 +362,20 @@ echo "  Build OK"
 # ---------------------------------------------------------------------------
 echo ""
 echo "[Init] Checking NPU ${NPU_DEVICE} readiness..."
-# Show what's using each NPU (informational only — don't kill processes on other NPUs)
 show_npu_memory
-# Only clean up processes on OUR target NPU ports
+# Check if our target ports are free — fail early if something else is using them.
 for port in ${VLLM_PORT_1} ${VLLM_PORT_2} ${GRPC_PORT}; do
-  pid_on_port=$("${PYTHON}" -c "
-import socket, os, signal
-try:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(1)
-    s.bind(('127.0.0.1', ${port}))
-    s.close()
-except OSError:
-    print('in_use')
-" 2>/dev/null)
-  if [ "${pid_on_port}" = "in_use" ]; then
-    echo "  Port ${port} is in use — attempting to free..."
-    fuser -k -n tcp ${port} 2>/dev/null || true
+  stale_pid=$(ss -tlnp "sport = :${port}" 2>/dev/null | grep -oP 'pid=\K\d+' | head -1 || true)
+  if [ -n "${stale_pid}" ]; then
+    cmd=$(ps -p "${stale_pid}" -o comm= 2>/dev/null || echo "unknown")
+    echo "  WARNING: Port ${port} held by PID ${stale_pid} (${cmd})"
+    echo "  This may be a leftover from a previous run."
+    echo "  Kill it manually: kill -9 ${stale_pid}"
+    echo "  Or wait and re-run the script."
+    exit 1
   fi
 done
-# Give any terminated processes time to release NPU memory
-sleep 5
+echo "  All target ports free ✓"
 
 # ---------------------------------------------------------------------------
 # Generate benchmark Python script
@@ -515,9 +556,11 @@ wait_npu_memory 20000 120
 ASCEND_RT_VISIBLE_DEVICES="${NPU_DEVICE}" nohup "${PYTHON}" -m vllm.entrypoints.openai.api_server \
   --model "${MODEL}" \
   --port "${VLLM_PORT_1}" \
-  --max-model-len 1024 \
-  --gpu-memory-utilization 0.25 \
+  --max-model-len 4096 \
+  --gpu-memory-utilization 0.5 \
+    --max-num-seqs 16 \
   --enforce-eager \
+  --profiler-config '{"profiler":"torch","torch_profiler_dir":"./vllm_profile","torch_profiler_with_stack":false}' \
   > "${VLLM1_LOG}" 2>&1 &
 VLLM1_PID=$!
 disown ${VLLM1_PID} 2>/dev/null || true
@@ -528,7 +571,7 @@ BASELINE_OUT="${RESULTS_DIR}/baseline_serve.json"
 "${PYTHON}" "${BENCH_SCRIPT}" "${NUM_REQUESTS}" "${CONCURRENCY}" \
   "http://127.0.0.1:${VLLM_PORT_1}" "${MODEL}" "${BASELINE_OUT}"
 
-kill_vllm_graceful "${VLLM1_PID}" "vLLM-baseline"
+kill_vllm_graceful "${VLLM1_PID}" "vLLM-baseline" "${VLLM_PORT_1}"
 wait_npu_memory 20000 120
 
 # ============================================================================
@@ -558,13 +601,15 @@ echo " Session 1: R1 FILL — vLLM + PegaFlow → D2H save"
 echo "============================================================"
 
 echo "[S1] Starting vLLM + PegaFlow..."
-wait_npu_memory 20000 120
+wait_npu_memory 30000 120
 ASCEND_RT_VISIBLE_DEVICES="${NPU_DEVICE}" nohup "${PYTHON}" -m vllm.entrypoints.openai.api_server \
   --model "${MODEL}" \
   --port "${VLLM_PORT_1}" \
-  --max-model-len 1024 \
-  --gpu-memory-utilization 0.25 \
+  --max-model-len 4096 \
+  --gpu-memory-utilization 0.5 \
+    --max-num-seqs 16 \
   --enforce-eager \
+  --profiler-config '{"profiler":"torch","torch_profiler_dir":"./vllm_profile","torch_profiler_with_stack":false}' \
   --kv-transfer-config '{"kv_connector":"PegaKVConnector","kv_role":"kv_both","kv_connector_module_path":"pegaflow.connector","kv_connector_extra_config":{"pegaflow.port":'"${GRPC_PORT}"'}}' \
   > "${VLLM1_LOG}" 2>&1 &
 VLLM1_PID=$!
@@ -607,7 +652,7 @@ echo "    resident_bytes:   ${R1_RESIDENT_AFTER}"
 # ---- Shutdown vLLM-1 (keep server alive) ----
 echo ""
 echo "  Shutting down vLLM-S1..."
-kill_vllm_graceful "${VLLM1_PID}" "vLLM-S1"
+kill_vllm_graceful "${VLLM1_PID}" "vLLM-S1" "${VLLM_PORT_1}"
 
 # Verify cache survived
 echo "  Checking cache survived vLLM restart..."
@@ -620,6 +665,17 @@ echo "    resident_bytes=${RESTART_RESIDENT} blocks=${RESTART_BLOCKS}"
 echo "  Waiting for NPU memory to stabilize..."
 wait_npu_memory 20000 120
 
+# Verify server is still alive before S2
+echo "  Checking pegaflow-server is alive..."
+if ! health_check "http://127.0.0.1:9091/health" 5; then
+  echo "  FAIL: pegaflow-server is not reachable (likely crashed during S1)."
+  echo "  Check server log: ${SERVER_LOG}"
+  echo "  S2 cannot proceed — server died with aclrtSynchronizeStream error."
+  cleanup_all
+  exit 1
+fi
+echo "  Server OK"
+
 # ============================================================================
 # Session 2: NEW vLLM + SAME pegaflow-server → H2D LOAD ★
 # ============================================================================
@@ -629,18 +685,28 @@ echo " Session 2: R2 HIT — New vLLM (cold APC) → H2D load"
 echo "============================================================"
 
 echo "[S2] Starting new vLLM + PegaFlow..."
-wait_npu_memory 20000 120
+wait_npu_memory 30000 120
 ASCEND_RT_VISIBLE_DEVICES="${NPU_DEVICE}" nohup "${PYTHON}" -m vllm.entrypoints.openai.api_server \
   --model "${MODEL}" \
   --port "${VLLM_PORT_2}" \
-  --max-model-len 1024 \
-  --gpu-memory-utilization 0.25 \
+  --max-model-len 4096 \
+  --gpu-memory-utilization 0.5 \
+    --max-num-seqs 16 \
   --enforce-eager \
+  --profiler-config '{"profiler":"torch","torch_profiler_dir":"./vllm_profile","torch_profiler_with_stack":false}' \
   --kv-transfer-config '{"kv_connector":"PegaKVConnector","kv_role":"kv_both","kv_connector_module_path":"pegaflow.connector","kv_connector_extra_config":{"pegaflow.port":'"${GRPC_PORT}"'}}' \
   > "${VLLM2_LOG}" 2>&1 &
 VLLM2_PID=$!
 disown ${VLLM2_PID} 2>/dev/null || true
-wait_for_vllm "${VLLM2_PID}" "${VLLM2_LOG}" "vLLM-S2" "${VLLM_PORT_2}" || exit 1
+wait_for_vllm "${VLLM2_PID}" "${VLLM2_LOG}" "vLLM-S2" "${VLLM_PORT_2}" || {
+  # S2 may fail due to insufficient NPU memory if orphan cleanup didn't work.
+  # Check if it's a memory error and provide actionable info.
+  if grep -q "Free memory.*less than desired" "${VLLM2_LOG}" 2>/dev/null; then
+    echo "  S2 failed: insufficient NPU memory. Orphan EngineCore may still hold memory."
+    echo "  Try: ps aux | grep EngineCore && kill -9 those PIDs"
+  fi
+  exit 1
+}
 
 R2_SAVE_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_save_bytes_total")
 R2_LOAD_BEFORE=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_load_bytes_total")
