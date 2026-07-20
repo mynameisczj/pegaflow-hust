@@ -253,7 +253,10 @@ fn main() {
     device.set_current().expect("aclrtSetDevice");
     let stream = device.create_stream().expect("create stream");
 
-    println!("# segment={SEG} B, warmup={WARMUP}, iters={ITERS}, device={}", config.device_id);
+    println!(
+        "# segment={SEG} B, warmup={WARMUP}, iters={ITERS}, device={}",
+        config.device_id
+    );
     println!("# host_alloc={} MiB\n", config.alloc_bytes / (1024 * 1024));
 
     // Allocate a max-sized host buffer once.
@@ -272,8 +275,7 @@ fn main() {
         let device = DeviceMem::alloc(total_bytes).expect("device alloc");
 
         for &direction in DIRECTIONS {
-            let (avg_us, gibps) =
-                measure_transfer(direction, &host, &device, total_bytes, &stream);
+            let (avg_us, gibps) = measure_transfer(direction, &host, &device, total_bytes, &stream);
             print_row(blocks, total_kib, direction.name(), avg_us, gibps);
         }
     }

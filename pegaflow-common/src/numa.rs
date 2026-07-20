@@ -272,9 +272,7 @@ where
 /// the CANN runtime.
 pub fn get_npu_device_count() -> Option<u32> {
     // Primary: use npu-smi -m to list all devices
-    if let Ok(output) = Command::new("npu-smi")
-        .args(["info", "-m"])
-        .output()
+    if let Ok(output) = Command::new("npu-smi").args(["info", "-m"]).output()
         && output.status.success()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -283,9 +281,7 @@ pub fn get_npu_device_count() -> Option<u32> {
         for line in stdout.lines() {
             let trimmed = line.trim();
             // Only count lines that have a numeric Chip Logic ID (not "-" for MCU).
-            if trimmed.starts_with(|c: char| c.is_ascii_digit())
-                && trimmed.contains("Ascend")
-            {
+            if trimmed.starts_with(|c: char| c.is_ascii_digit()) && trimmed.contains("Ascend") {
                 count += 1;
             }
         }
