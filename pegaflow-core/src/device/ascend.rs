@@ -467,7 +467,11 @@ pub fn memcpy_h2d_async(
         ));
     }
 
-    // For other errors, try the synchronous fallback.
+    // For other errors (e.g. 507001 ACL_ERROR_RT_TS_ERROR), fall back to a
+    // synchronous aclrtMemcpy.  We intentionally do NOT call stream.synchronize()
+    // after the sync copy — the async call may have partially enqueued a task
+    // that leaves the stream in a bad state, and synchronize() would trigger the
+    // same TS error again.  The sync copy is already complete when it returns.
     log::warn!(
         "aclrtMemcpyAsync(H2D) failed: error {ret} ({desc}), size={size} — \
          falling back to synchronous aclrtMemcpy"
@@ -488,7 +492,6 @@ pub fn memcpy_h2d_async(
              error {ret} ({desc}), size={size}."
         ));
     }
-    stream.synchronize()?;
     log::debug!("aclrtMemcpy(H2D sync fallback) succeeded: size={size}");
     Ok(())
 }
@@ -537,7 +540,11 @@ pub fn memcpy_d2h_async(
         ));
     }
 
-    // For other errors, try the synchronous fallback.
+    // For other errors (e.g. 507001 ACL_ERROR_RT_TS_ERROR), fall back to a
+    // synchronous aclrtMemcpy.  We intentionally do NOT call stream.synchronize()
+    // after the sync copy — the async call may have partially enqueued a task
+    // that leaves the stream in a bad state, and synchronize() would trigger the
+    // same TS error again.  The sync copy is already complete when it returns.
     log::warn!(
         "aclrtMemcpyAsync(D2H) failed: error {ret} ({desc}), size={size} — \
          falling back to synchronous aclrtMemcpy"
@@ -558,7 +565,6 @@ pub fn memcpy_d2h_async(
              error {ret} ({desc}), size={size}."
         ));
     }
-    stream.synchronize()?;
     log::debug!("aclrtMemcpy(D2H sync fallback) succeeded: size={size}");
     Ok(())
 }
