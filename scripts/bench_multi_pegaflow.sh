@@ -580,22 +580,23 @@ WARMUP_OUT="${RESULTS_DIR}/warmup.json"
 # Kill warmup vLLM so NPU is idle → DMA saves can drain without competing
 # with compute. This is the same pattern as bench_pegaflow.sh Session-1 kill.
 echo "  Killing warmup instance to let DMA saves drain..."
+# Give connector time to submit pending save RPCs before kill
+sleep 30
 kill_vllm_graceful "${WARMUP_PID}" "vLLM-warmup" "${WARMUP_PORT}"
 
-# Wait for DMA saves to actually complete.
-echo "  Waiting for async DMA saves to finish..."
-SAVE_TIMEOUT=60
+# Wait for DMA saves to drain.  The save worker may have been blocked on
+# stream sync during warmup; after NPU is freed (vLLM killed), pending
+# saves complete.  Poll for up to 3 minutes with 5s intervals.
+echo "  Waiting for async DMA saves to drain..."
+SAVE_TIMEOUT=36  # 36 × 5s = 180s
 for i in $(seq 1 ${SAVE_TIMEOUT}); do
+  sleep 5
   INS=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_cache_block_insertions")
   SAV=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_save_bytes_total")
-  if [ -n "${INS}" ] && [ "${INS}" -gt 0 ] && [ -n "${SAV}" ] && [ "${SAV}" -gt 0 ]; then
-    echo "    ${INS} blocks, ${SAV} bytes saved (after ${i}s)"
-    break
+  if [ -n "${SAV}" ] && [ "${SAV}" -gt 0 ] && [ -n "${INS}" ] && [ "${INS}" -gt 0 ]; then
+    echo "    ${INS} blocks, ${SAV} bytes saved (after $((i*5))s)"
+    # Continue polling in case more saves arrive
   fi
-  if [ $((i % 10)) -eq 0 ]; then
-    echo "    Still waiting (${i}s)..."
-  fi
-  sleep 1
 done
 
 SAVE_AFTER=$(fetch_metric "http://127.0.0.1:9091/metrics" "pegaflow_save_bytes_total")

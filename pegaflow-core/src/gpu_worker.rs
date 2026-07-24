@@ -278,13 +278,13 @@ fn build_backend(
             #[cfg(feature = "cuda")]
             DeviceContext::Cuda(_) => Ok(Box::new(MemcpyBackend)),
             #[cfg(feature = "ascend")]
-            DeviceContext::Ascend(_) => Ok(Box::new(AscendMemcpyBackend)),
+            DeviceContext::Ascend(d) => Ok(Box::new(AscendMemcpyBackend::new(d.device_id))),
         },
         TransferMode::AscendDirect => {
             #[cfg(feature = "ascend")]
             {
-                if matches!(ctx, DeviceContext::Ascend(_)) {
-                    return Ok(Box::new(AscendMemcpyBackend));
+                if let DeviceContext::Ascend(d) = ctx {
+                    return Ok(Box::new(AscendMemcpyBackend::new(d.device_id)));
                 }
             }
             Err(EngineError::DeviceInit(

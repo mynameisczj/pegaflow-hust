@@ -108,6 +108,41 @@ unsafe extern "C" {
     /// Block the calling thread until the event is recorded (i.e. until
     /// all preceding work in the event's stream has completed).
     fn aclrtSynchronizeEvent(event: aclrtEvent) -> aclError;
+
+    // -- Batch memcpy API (CANN 8.5+) ----------------------------------
+
+    fn aclrtMemcpyBatchAsync(
+        dsts: *mut *mut c_void,
+        dest_maxs: *mut usize,
+        srcs: *mut *mut c_void,
+        sizes: *mut usize,
+        num_batches: usize,
+        attrs: *const AclrtMemcpyBatchAttr,
+        attr_indexes: *mut usize,
+        num_attrs: usize,
+        fail_index: *mut usize,
+        stream: aclrtStream,
+    ) -> aclError;
+}
+
+/// Location descriptor for batch memcpy src/dst.
+/// Matches `AclrtMemLocation` in acl_rt.h.
+#[repr(C)]
+struct AclrtMemLocation {
+    id: u32,
+    _type: i32,
+}
+
+/// Attribute for a batch memcpy operation.
+/// Matches `AclrtMemcpyBatchAttr` in acl_rt.h:
+///   AclrtMemLocation dstLoc;   // offset 0
+///   AclrtMemLocation srcLoc;   // offset 8
+///   uint8_t rsv[16];           // offset 16
+#[repr(C)]
+struct AclrtMemcpyBatchAttr {
+    dst_loc: AclrtMemLocation,
+    src_loc: AclrtMemLocation,
+    _rsv: [u8; 16],
 }
 
 // ---------------------------------------------------------------------------
@@ -569,9 +604,115 @@ pub fn memcpy_d2h_async(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Ascend Device Allocation (for integration tests — not used in production paths)
-// ---------------------------------------------------------------------------
+// -- Batch memcpy wrappers (CANN 8.5+) -----------------------------------
+
+/// Submit a batch of H2D copies via a single `aclrtMemcpyBatchAsync` call.
+///
+/// This avoids the TS queue overflow (507001) caused by submitting hundreds
+/// or thousands of individual `aclrtMemcpyAsync` calls on one stream.
+/// All copies share a single TS slot.
+pub fn memcpy_batch_h2d(
+    copies: &[(u64, *mut u8, usize)],
+    device_id: i32,
+    stream: &AscendDeviceStream,
+) -> Result<(), String> {
+    ensure_acl_initialized()?;
+    let n = copies.len();
+    if n == 0 {
+        return Ok(());
+    }
+
+    let mut dsts: Vec<u64> = Vec::with_capacity(n);
+    let mut srcs: Vec<u64> = Vec::with_capacity(n);
+    let mut sizes: Vec<u64> = Vec::with_capacity(n);
+
+    for &(dev, host, size) in copies {
+        dsts.push(dev);
+        srcs.push(host as u64);
+        sizes.push(size as u64);
+    }
+
+    unsafe extern "C" {
+        fn pega_aclrt_memcpy_batch_h2d(
+            dsts: *const u64,
+            srcs: *const u64,
+            sizes: *const u64,
+            num_batches: u64,
+            device_id: i32,
+            stream: aclrtStream,
+        ) -> aclError;
+    }
+
+    let ret = unsafe {
+        pega_aclrt_memcpy_batch_h2d(
+            dsts.as_ptr(),
+            srcs.as_ptr(),
+            sizes.as_ptr(),
+            n as u64,
+            device_id,
+            stream.stream,
+        )
+    };
+    if ret != ACL_ERROR_NONE {
+        return Err(format!(
+            "aclrtMemcpyBatchAsync(H2D) failed: error {ret}, num_batches={n}"
+        ));
+    }
+    Ok(())
+}
+
+/// Submit a batch of D2H copies via a single `aclrtMemcpyBatchAsync` call.
+pub fn memcpy_batch_d2h(
+    copies: &[(u64, *mut u8, usize)],
+    device_id: i32,
+    stream: &AscendDeviceStream,
+) -> Result<(), String> {
+    ensure_acl_initialized()?;
+    let n = copies.len();
+    if n == 0 {
+        return Ok(());
+    }
+
+    let mut srcs: Vec<u64> = Vec::with_capacity(n);
+    let mut dsts: Vec<u64> = Vec::with_capacity(n);
+    let mut sizes: Vec<u64> = Vec::with_capacity(n);
+
+    for &(dev, host, size) in copies {
+        srcs.push(dev);
+        dsts.push(host as u64);
+        sizes.push(size as u64);
+    }
+
+    unsafe extern "C" {
+        fn pega_aclrt_memcpy_batch_d2h(
+            srcs: *const u64,
+            dsts: *const u64,
+            sizes: *const u64,
+            num_batches: u64,
+            device_id: i32,
+            stream: aclrtStream,
+        ) -> aclError;
+    }
+
+    let ret = unsafe {
+        pega_aclrt_memcpy_batch_d2h(
+            srcs.as_ptr(),
+            dsts.as_ptr(),
+            sizes.as_ptr(),
+            n as u64,
+            device_id,
+            stream.stream,
+        )
+    };
+    if ret != ACL_ERROR_NONE {
+        return Err(format!(
+            "aclrtMemcpyBatchAsync(D2H) failed: error {ret}, num_batches={n}"
+        ));
+    }
+    Ok(())
+}
+
+// -- Device allocation (test helpers) -------------------------------------
 
 /// Allocate device memory via `aclrtMalloc`. Returns a raw device pointer as `u64`.
 ///

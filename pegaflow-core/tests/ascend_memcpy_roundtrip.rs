@@ -272,7 +272,7 @@ fn ascend_transfer_backend_roundtrip() {
         size: SIZE,
     };
 
-    let backend = AscendMemcpyBackend;
+    let backend = AscendMemcpyBackend::new(0);
 
     // Execute D2H via backend
     backend.d2h(&[desc], &stream).expect("backend d2h");
@@ -343,7 +343,7 @@ fn ascend_transfer_backend_coalesced() {
         },
     ];
 
-    let backend = AscendMemcpyBackend;
+    let backend = AscendMemcpyBackend::new(0);
 
     // D2H both segments
     backend.d2h(&descs, &stream).expect("backend d2h coalesced");

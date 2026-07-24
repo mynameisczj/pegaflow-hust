@@ -1,9 +1,8 @@
-//! Ascend DMA copy-engine backend: coalesce contiguous copies, then
-//! one directional `aclrtMemcpyAsync` per merged range (H2D or D2H).
+//! Ascend DMA copy-engine backend.
 //!
-//! API mappings (CANN ← CUDA):
-//! - `aclrtMemcpyAsync(HOST_TO_DEVICE)` ← `cuMemcpyHtoDAsync_v2`
-//! - `aclrtMemcpyAsync(DEVICE_TO_HOST)` ← `cuMemcpyDtoHAsync_v2`
+//! Submits copies via `aclrtMemcpyBatchAsync` (CANN 8.5+) in one batch call,
+//! then synchronizes once.  This avoids both TS queue overflow (507001) and
+//! the per-copy sync fallback that blocks for seconds on a busy NPU.
 
 use std::sync::Arc;
 
@@ -11,51 +10,15 @@ use crate::device::{DeviceStream, ascend};
 
 use super::{CopyDesc, TransferBackend};
 
-/// A run of input copies that are contiguous on both the device and the host
-/// side, submitted as a single `aclrtMemcpyAsync`.
-struct Merged {
-    device: u64,
-    host: *mut u8,
-    size: usize,
+pub struct AscendMemcpyBackend {
+    device_id: i32,
 }
 
-/// Coalesce copies that are adjacent on both sides into larger ranges.
-/// Same merge logic as the CUDA memcpy backend.
-fn merge(copies: &[CopyDesc]) -> Vec<Merged> {
-    let mut out = Vec::with_capacity(copies.len());
-    let mut i = 0;
-    while i < copies.len() {
-        let start = copies[i];
-        let mut size = start.size;
-        let mut j = i + 1;
-        while j < copies.len() {
-            let next = copies[j];
-            let device_contiguous = start.device + size as u64 == next.device;
-            // SAFETY: pointer arithmetic used only for an address-equality check;
-            // the result is never dereferenced.
-            let host_contiguous = unsafe { start.host.add(size) } == next.host;
-            if device_contiguous && host_contiguous {
-                size += next.size;
-                j += 1;
-            } else {
-                break;
-            }
-        }
-        out.push(Merged {
-            device: start.device,
-            host: start.host,
-            size,
-        });
-        i = j;
+impl AscendMemcpyBackend {
+    pub fn new(device_id: i32) -> Self {
+        Self { device_id }
     }
-    out
 }
-
-/// Ascend DMA copy-engine transfer backend.
-///
-/// Uses `aclrtMemcpyAsync` for H2D/D2H transfers, coalescing
-/// contiguous ranges into minimal submissions.
-pub struct AscendMemcpyBackend;
 
 impl TransferBackend for AscendMemcpyBackend {
     fn h2d(&self, copies: &[CopyDesc], stream: &Arc<DeviceStream>) -> Result<(), String> {
@@ -63,10 +26,10 @@ impl TransferBackend for AscendMemcpyBackend {
             DeviceStream::Ascend(s) => s,
             _ => return Err("AscendMemcpyBackend::h2d called with non-Ascend stream".into()),
         };
-        for m in merge(copies) {
-            ascend::memcpy_h2d_async(m.device, m.host, m.size, ascend_stream)?;
-        }
-        Ok(())
+        if copies.is_empty() { return Ok(()); }
+        let batch: Vec<(u64, *mut u8, usize)> = copies.iter()
+            .map(|c| (c.device, c.host, c.size)).collect();
+        ascend::memcpy_batch_h2d(&batch, self.device_id, ascend_stream)
     }
 
     fn d2h(&self, copies: &[CopyDesc], stream: &Arc<DeviceStream>) -> Result<(), String> {
@@ -74,23 +37,20 @@ impl TransferBackend for AscendMemcpyBackend {
             DeviceStream::Ascend(s) => s,
             _ => return Err("AscendMemcpyBackend::d2h called with non-Ascend stream".into()),
         };
-        for m in merge(copies) {
-            ascend::memcpy_d2h_async(m.host, m.device, m.size, ascend_stream)?;
-        }
-        Ok(())
+        if copies.is_empty() { return Ok(()); }
+        let batch: Vec<(u64, *mut u8, usize)> = copies.iter()
+            .map(|c| (c.device, c.host, c.size)).collect();
+        ascend::memcpy_batch_d2h(&batch, self.device_id, ascend_stream)
     }
 
-    fn name(&self) -> &'static str {
-        "ascend_direct"
-    }
+    fn name(&self) -> &'static str { "ascend_batch" }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn ascend_backend_name() {
-        assert_eq!(AscendMemcpyBackend.name(), "ascend_direct");
+        assert_eq!(AscendMemcpyBackend::new(0).name(), "ascend_batch");
     }
 }

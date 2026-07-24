@@ -397,10 +397,18 @@ impl Engine for GrpcEngineService {
                 instance_id, tp_rank, pp_rank, device_id, layer_count, total_blocks, total_hashes
             );
 
-            self.engine
-                .batch_save_kv_blocks_from_ipc(&instance_id, tp_rank, pp_rank, device_id, saves)
-                .await
-                .map_err(Self::map_engine_error)?;
+            // Spawn the save work independently so it survives client disconnect
+            // (vLLM SIGKILL).  The connector is fire-and-forget for saves.
+            let engine = self.engine.clone();
+            let sid = instance_id.clone();
+            tokio::spawn(async move {
+                if let Err(e) = engine
+                    .batch_save_kv_blocks_from_ipc(&sid, tp_rank, pp_rank, device_id, saves)
+                    .await
+                {
+                    log::error!("Background save failed for instance {sid}: {e}");
+                }
+            });
 
             Ok(Response::new(SaveResponse {
                 status: Some(Self::build_simple_response()),

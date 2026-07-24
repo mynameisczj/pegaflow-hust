@@ -117,7 +117,7 @@ fn ascend_unified_save_load_chain() {
         size: SIZE,
     };
 
-    let backend = AscendMemcpyBackend;
+    let backend = AscendMemcpyBackend::new(0);
 
     // Execute D2H (simulating save path)
     backend.d2h(&[desc], &stream).expect("backend d2h = save");
@@ -225,7 +225,7 @@ fn ascend_unified_multi_layer() {
         })
         .collect();
 
-    let backend = AscendMemcpyBackend;
+    let backend = AscendMemcpyBackend::new(0);
 
     // Save (D2H) both layers
     backend.d2h(&descs, &stream).expect("multi-layer d2h");
