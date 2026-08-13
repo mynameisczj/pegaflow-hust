@@ -291,6 +291,15 @@ fn format_py_err(err: PyErr) -> String {
     Python::attach(|py| err.value(py).to_string())
 }
 
+/// Import `torch_npu` (best-effort) so `torch.npu` is registered on Ascend.
+///
+/// `torch_npu` plugs the NPU backend into a CPU/CUDA torch build: `torch.npu`
+/// does not exist until the module is imported. On CUDA-only machines the
+/// import fails and this is a no-op.
+pub(crate) fn ensure_torch_npu(py: Python<'_>) {
+    let _ = py.import("torch_npu");
+}
+
 fn init_device() -> Result<(), std::io::Error> {
     // On Ascend, initialize the ACL runtime and set device 0 as the
     // active device for the calling (main) thread. This must happen
@@ -323,6 +332,7 @@ fn init_device() -> Result<(), std::io::Error> {
 fn detect_devices() -> Result<Vec<i32>, std::io::Error> {
     Python::attach(|py| -> pyo3::PyResult<Vec<i32>> {
         let torch = py.import("torch")?;
+        ensure_torch_npu(py);
         // Try NPU first for Ascend; fall back to CUDA.
         let dev: Vec<i32> = if let Ok(npu) = torch.getattr("npu") {
             let count: i32 = npu.call_method0("device_count")?.extract()?;
@@ -360,6 +370,7 @@ fn init_python_device(device_ids: &[i32]) -> Result<(), std::io::Error> {
 
     Python::attach(|py| -> pyo3::PyResult<()> {
         let torch = py.import("torch")?;
+        ensure_torch_npu(py);
 
         // Detect which device backend is available.
         let (dev, prefix): (Py<PyAny>, &str) = if let Ok(npu) = torch.getattr("npu") {

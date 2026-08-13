@@ -46,6 +46,7 @@ impl CudaTensorRegistry {
     pub fn new() -> PyResult<Self> {
         Python::attach(|py| {
             let torch = py.import("torch")?;
+            crate::ensure_torch_npu(py);
             // Try NPU first for Ascend; fall back to CUDA.
             if let Ok(npu) = torch.getattr("npu") {
                 npu.call_method0("init")?;
@@ -184,6 +185,7 @@ impl CudaTensorRegistry {
     fn materialize_tensor(device_id: i32, wrapper_bytes: &[u8]) -> PyResult<LayerTensor> {
         Python::attach(|py| {
             let torch = py.import("torch")?;
+            crate::ensure_torch_npu(py);
             let pickle = py.import("pickle")?;
 
             // Select the correct device runtime based on what is available.
