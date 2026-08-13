@@ -1,0 +1,100 @@
+2026-08-13T09:12:42.969245+00:00   INFO pegaflow_server: lib.rs:480 Starting pega-engine-server v0.23.3
+2026-08-13T09:12:43.224636+00:00   INFO pegaflow_server: lib.rs:319 Ascend ACL runtime initialized, device 0 set as current
+2026-08-13T09:12:43.224705+00:00   INFO pegaflow_server::check_ascend_version: check_ascend_version.rs:40 Ascend preflight: minimum required version 1.16.0
+2026-08-13T09:12:43.224745+00:00   INFO pegaflow_server::check_ascend_version: check_ascend_version.rs:52 Ascend preflight: runtime version 1.16.0 detected
+2026-08-13T09:12:43.224753+00:00   INFO pegaflow_server: lib.rs:498 Using specified device(s): [3, 4, 5, 6, 7]
+2026-08-13T09:12:52.032322+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 3 in 0.24s
+2026-08-13T09:12:52.260424+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 4 in 0.23s
+2026-08-13T09:12:52.518566+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 5 in 0.26s
+2026-08-13T09:12:52.778345+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 6 in 0.26s
+2026-08-13T09:12:53.013565+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 7 in 0.24s
+2026-08-13T09:12:53.013671+00:00   INFO pegaflow_server: lib.rs:507 Device runtime initialized for 5 device(s): [3, 4, 5, 6, 7]
+2026-08-13T09:12:53.013999+00:00   INFO pegaflow_server: lib.rs:528 Creating PegaEngine with pinned memory pool: 16.00 GiB (17179869184 bytes), hugepages=false
+2026-08-13T09:12:53.078236+00:00   INFO pegaflow_server: lib.rs:446 Prometheus metrics exporter enabled
+2026-08-13T09:12:53.078354+00:00   INFO opentelemetry: metrics.rs:29  name="MeterProvider.GlobalSet" message=Global meter provider is set. Meters can now be created using global::meter() or global::meter_with_scope().
+2026-08-13T09:12:59.437912+00:00   INFO pegaflow_common::numa: numa.rs:650 === Device-NUMA Topology ===
+2026-08-13T09:12:59.438000+00:00   INFO pegaflow_common::numa: numa.rs:651 NUMA nodes: 8
+2026-08-13T09:12:59.438014+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 0 -> NUMA6
+2026-08-13T09:12:59.438020+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 1 -> NUMA6
+2026-08-13T09:12:59.438025+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 2 -> NUMA4
+2026-08-13T09:12:59.438030+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 3 -> NUMA4
+2026-08-13T09:12:59.438034+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 4 -> NUMA0
+2026-08-13T09:12:59.438038+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 5 -> NUMA0
+2026-08-13T09:12:59.438042+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 6 -> NUMA2
+2026-08-13T09:12:59.438046+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 7 -> NUMA2
+2026-08-13T09:12:59.438053+00:00   INFO pegaflow_core: lib.rs:163 Auto-enabling NUMA-aware memory allocation for 4 GPU-local NUMA nodes (8 CPU NUMA nodes detected)
+2026-08-13T09:12:59.438099+00:00   INFO pegaflow_core::storage: mod.rs:150 Creating NUMA-aware pinned pools for 4 nodes
+2026-08-13T09:12:59.438106+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:547 Creating NUMA-aware pools: total=16.0 GiB, nodes=4, per_node=4.0 GiB, shards_per_node=1
+2026-08-13T09:12:59.439193+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:203 Allocating pinned memory pool with aclrtMallocHost mapped pages
+2026-08-13T09:12:59.439322+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:262 Ascend pinned pool on NUMA node NUMA0 → using device 5
+2026-08-13T09:12:59.465394+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:213 Pinned pool: backing_size=4.0 GiB, unit_size=512 B, max_units=8388608, allocatable_size=4.0 GiB
+2026-08-13T09:12:59.529335+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:580 Created pinned pool on NUMA0: capacity=4.0 GiB
+2026-08-13T09:12:59.531194+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:203 Allocating pinned memory pool with aclrtMallocHost mapped pages
+2026-08-13T09:12:59.531330+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:262 Ascend pinned pool on NUMA node NUMA2 → using device 7
+2026-08-13T09:12:59.576315+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:213 Pinned pool: backing_size=4.0 GiB, unit_size=512 B, max_units=8388608, allocatable_size=4.0 GiB
+2026-08-13T09:12:59.685121+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:580 Created pinned pool on NUMA2: capacity=4.0 GiB
+2026-08-13T09:12:59.688234+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:203 Allocating pinned memory pool with aclrtMallocHost mapped pages
+2026-08-13T09:12:59.688351+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:262 Ascend pinned pool on NUMA node NUMA4 → using device 2
+2026-08-13T09:12:59.977112+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:213 Pinned pool: backing_size=4.0 GiB, unit_size=512 B, max_units=8388608, allocatable_size=4.0 GiB
+2026-08-13T09:13:00.045866+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:580 Created pinned pool on NUMA4: capacity=4.0 GiB
+2026-08-13T09:13:00.050268+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:203 Allocating pinned memory pool with aclrtMallocHost mapped pages
+2026-08-13T09:13:00.050376+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:262 Ascend pinned pool on NUMA node NUMA6 → using device 1
+2026-08-13T09:13:00.325617+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:213 Pinned pool: backing_size=4.0 GiB, unit_size=512 B, max_units=8388608, allocatable_size=4.0 GiB
+2026-08-13T09:13:00.396069+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:580 Created pinned pool on NUMA6: capacity=4.0 GiB
+2026-08-13T09:13:00.396718+00:00   INFO pegaflow_server: lib.rs:688 Background GC task started (interval=60s, inflight_max_age=5m, failed_remote_max_age=5m)
+2026-08-13T09:13:00.396829+00:00   INFO pegaflow_server::http_server: http_server.rs:187 Starting HTTP server on 0.0.0.0:9091 (/health, /metrics, /instances, /instances/cleanup, /cache/memory/cleanup)
+2026-08-13T09:13:00.396866+00:00   INFO pegaflow_server: lib.rs:716 PegaEngine gRPC server listening on 0.0.0.0:50080
+2026-08-13T09:14:58.804870+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:338 GPU worker initialized: device=7 backend=ascend_batch device_id=7
+2026-08-13T09:14:58.805235+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:338 GPU worker initialized: device=7 backend=ascend_batch device_id=7
+2026-08-13T09:14:58.805329+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:200 GPU worker pool started: device=7, numa_node=NUMA2, transfer_mode=AscendDirect
+2026-08-13T09:14:58.805442+00:00   INFO pegaflow_core::instance: instance.rs:706 Sealed instance topology: instance=86de1dc5-7a70-44a2-bf49-90fbf0fffe9c-939011a1f9c14be180fc0b5c246c6b8c, num_layers=72, tp_size=1, world_size=1, total_slots=72
+2026-08-13T09:14:58.805457+00:00   INFO pegaflow_core::instance: instance.rs:719 Initialized GPU context: device_id=7, numa_node=NUMA2
+2026-08-13T09:14:58.805463+00:00   INFO pegaflow_core: lib.rs:452 Registered context batch: instance=86de1dc5-7a70-44a2-bf49-90fbf0fffe9c-939011a1f9c14be180fc0b5c246c6b8c, namespace=audit-iso-c1-7, device=7, layers=72, tp_rank=0/1, pp_rank=0
+2026-08-13T09:15:01.400984+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:338 GPU worker initialized: device=3 backend=ascend_batch device_id=3
+2026-08-13T09:15:01.401839+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:338 GPU worker initialized: device=3 backend=ascend_batch device_id=3
+2026-08-13T09:15:01.401991+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:200 GPU worker pool started: device=3, numa_node=NUMA4, transfer_mode=AscendDirect
+2026-08-13T09:15:01.402172+00:00   INFO pegaflow_core::instance: instance.rs:706 Sealed instance topology: instance=e8d76ecc-e49b-4015-8d7f-cccefaa400cb-c795b021e07045759703f790b921c507, num_layers=72, tp_size=1, world_size=1, total_slots=72
+2026-08-13T09:15:01.402188+00:00   INFO pegaflow_core::instance: instance.rs:719 Initialized GPU context: device_id=3, numa_node=NUMA4
+2026-08-13T09:15:01.402195+00:00   INFO pegaflow_core: lib.rs:452 Registered context batch: instance=e8d76ecc-e49b-4015-8d7f-cccefaa400cb-c795b021e07045759703f790b921c507, namespace=audit-iso-c1-3, device=3, layers=72, tp_rank=0/1, pp_rank=0
+2026-08-13T09:15:01.826294+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:338 GPU worker initialized: device=4 backend=ascend_batch device_id=4
+2026-08-13T09:15:01.827056+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:338 GPU worker initialized: device=4 backend=ascend_batch device_id=4
+2026-08-13T09:15:01.827179+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:200 GPU worker pool started: device=4, numa_node=NUMA0, transfer_mode=AscendDirect
+2026-08-13T09:15:01.827346+00:00   INFO pegaflow_core::instance: instance.rs:706 Sealed instance topology: instance=f52ce94e-097a-4e21-ab8e-458ae6d065c7-8f191cbcbf984a98851bd32b3a70ccba, num_layers=72, tp_size=1, world_size=1, total_slots=72
+2026-08-13T09:15:01.827360+00:00   INFO pegaflow_core::instance: instance.rs:719 Initialized GPU context: device_id=4, numa_node=NUMA0
+2026-08-13T09:15:01.827367+00:00   INFO pegaflow_core: lib.rs:452 Registered context batch: instance=f52ce94e-097a-4e21-ab8e-458ae6d065c7-8f191cbcbf984a98851bd32b3a70ccba, namespace=audit-iso-c1-4, device=4, layers=72, tp_rank=0/1, pp_rank=0
+2026-08-13T09:15:02.808748+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:338 GPU worker initialized: device=5 backend=ascend_batch device_id=5
+2026-08-13T09:15:02.809305+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:338 GPU worker initialized: device=5 backend=ascend_batch device_id=5
+2026-08-13T09:15:02.809398+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:200 GPU worker pool started: device=5, numa_node=NUMA0, transfer_mode=AscendDirect
+2026-08-13T09:15:02.809531+00:00   INFO pegaflow_core::instance: instance.rs:706 Sealed instance topology: instance=9f308603-282c-4036-ad34-32faf4246c11-7d163c5e4c404607b588674dcaac0586, num_layers=72, tp_size=1, world_size=1, total_slots=72
+2026-08-13T09:15:02.809550+00:00   INFO pegaflow_core::instance: instance.rs:719 Initialized GPU context: device_id=5, numa_node=NUMA0
+2026-08-13T09:15:02.809558+00:00   INFO pegaflow_core: lib.rs:452 Registered context batch: instance=9f308603-282c-4036-ad34-32faf4246c11-7d163c5e4c404607b588674dcaac0586, namespace=audit-iso-c1-5, device=5, layers=72, tp_rank=0/1, pp_rank=0
+2026-08-13T09:15:03.060466+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:338 GPU worker initialized: device=6 backend=ascend_batch device_id=6
+2026-08-13T09:15:03.060940+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:338 GPU worker initialized: device=6 backend=ascend_batch device_id=6
+2026-08-13T09:15:03.061039+00:00   INFO pegaflow_core::gpu_worker: gpu_worker.rs:200 GPU worker pool started: device=6, numa_node=NUMA2, transfer_mode=AscendDirect
+2026-08-13T09:15:03.061154+00:00   INFO pegaflow_core::instance: instance.rs:706 Sealed instance topology: instance=4c6a738a-4ea3-4088-ac9a-b36fcc741ffe-054a960844db44cfb5727d9d034aa97d, num_layers=72, tp_size=1, world_size=1, total_slots=72
+2026-08-13T09:15:03.061171+00:00   INFO pegaflow_core::instance: instance.rs:719 Initialized GPU context: device_id=6, numa_node=NUMA2
+2026-08-13T09:15:03.061177+00:00   INFO pegaflow_core: lib.rs:452 Registered context batch: instance=4c6a738a-4ea3-4088-ac9a-b36fcc741ffe-054a960844db44cfb5727d9d034aa97d, namespace=audit-iso-c1-6, device=6, layers=72, tp_rank=0/1, pp_rank=0
+2026-08-13T09:15:07.036354+00:00   INFO pegaflow_server::service: service.rs:931 Session opened: instance_id=86de1dc5-7a70-44a2-bf49-90fbf0fffe9c-939011a1f9c14be180fc0b5c246c6b8c namespace=audit-iso-c1-7 tp_size=1 world_size=1 token=1
+2026-08-13T09:15:09.960892+00:00   INFO pegaflow_server::service: service.rs:931 Session opened: instance_id=e8d76ecc-e49b-4015-8d7f-cccefaa400cb-c795b021e07045759703f790b921c507 namespace=audit-iso-c1-3 tp_size=1 world_size=1 token=2
+2026-08-13T09:15:10.276716+00:00   INFO pegaflow_server::service: service.rs:931 Session opened: instance_id=f52ce94e-097a-4e21-ab8e-458ae6d065c7-8f191cbcbf984a98851bd32b3a70ccba namespace=audit-iso-c1-4 tp_size=1 world_size=1 token=3
+2026-08-13T09:15:11.090863+00:00   INFO pegaflow_server::service: service.rs:931 Session opened: instance_id=9f308603-282c-4036-ad34-32faf4246c11-7d163c5e4c404607b588674dcaac0586 namespace=audit-iso-c1-5 tp_size=1 world_size=1 token=4
+2026-08-13T09:15:11.636379+00:00   INFO pegaflow_server::service: service.rs:931 Session opened: instance_id=4c6a738a-4ea3-4088-ac9a-b36fcc741ffe-054a960844db44cfb5727d9d034aa97d namespace=audit-iso-c1-6 tp_size=1 world_size=1 token=5
+2026-08-13T09:15:18.888473+00:00   INFO pegaflow_core::storage::prefetch: prefetch.rs:316 Prefetch local-hit timing: req_id=cmpl-trace-9f68807319f4-0-9a856346 total_keys=76 hit=0 missing=76 key_build=6.51µs cache_scan=1.04µs task_schedule=610ns total=37.5µs
+2026-08-13T09:15:53.501254+00:00   INFO pegaflow_core::storage::prefetch: prefetch.rs:316 Prefetch local-hit timing: req_id=cmpl-trace-1f306e366ccb-0-bc9e3945 total_keys=76 hit=0 missing=76 key_build=4.98µs cache_scan=2.75µs task_schedule=690ns total=18.831µs
+2026-08-13T09:15:57.189199+00:00   INFO pegaflow_core::storage::prefetch: prefetch.rs:316 Prefetch local-hit timing: req_id=cmpl-trace-21e696c73f48-0-9178d4d1 total_keys=76 hit=0 missing=76 key_build=4.92µs cache_scan=1.38µs task_schedule=820ns total=14.22µs
+2026-08-13T09:16:00.251153+00:00   INFO pegaflow_core::storage::prefetch: prefetch.rs:316 Prefetch local-hit timing: req_id=cmpl-trace-00f64407d864-0-8fb24da3 total_keys=76 hit=0 missing=76 key_build=7.03µs cache_scan=1.48µs task_schedule=850ns total=14.76µs
+2026-08-13T09:16:03.267163+00:00   INFO pegaflow_core::storage::prefetch: prefetch.rs:316 Prefetch local-hit timing: req_id=cmpl-trace-6fdd7957490e-0-ab4409f6 total_keys=76 hit=0 missing=76 key_build=5.9µs cache_scan=1.67µs task_schedule=920ns total=14.26µs
+2026-08-13T09:16:18.017793+00:00   INFO pegaflow_core::storage::prefetch: prefetch.rs:316 Prefetch local-hit timing: req_id=cmpl-trace-6aa316d59527-0-9ff04c60 total_keys=1 hit=0 missing=1 key_build=460ns cache_scan=1.29µs task_schedule=620ns total=10.72µs
+2026-08-13T09:16:20.000570+00:00   INFO pegaflow_core::storage::prefetch: prefetch.rs:316 Prefetch local-hit timing: req_id=cmpl-trace-657b818b2445-0-b51b5154 total_keys=1 hit=0 missing=1 key_build=610ns cache_scan=5.26µs task_schedule=650ns total=12.55µs
+2026-08-13T09:16:22.913799+00:00   INFO pegaflow_core::storage::prefetch: prefetch.rs:316 Prefetch local-hit timing: req_id=cmpl-trace-fc00e62ff85f-0-8d66112d total_keys=1 hit=0 missing=1 key_build=390ns cache_scan=1.31µs task_schedule=840ns total=15.24µs
+2026-08-13T09:16:25.244876+00:00   INFO pegaflow_core::storage::prefetch: prefetch.rs:316 Prefetch local-hit timing: req_id=cmpl-trace-de2dea710e93-0-8a571d5d total_keys=1 hit=0 missing=1 key_build=690ns cache_scan=1.31µs task_schedule=640ns total=6.62µs
+2026-08-13T09:16:27.478765+00:00   INFO pegaflow_core::storage::prefetch: prefetch.rs:316 Prefetch local-hit timing: req_id=cmpl-trace-50323161ef14-0-9088ea20 total_keys=1 hit=0 missing=1 key_build=700ns cache_scan=1.53µs task_schedule=780ns total=7.34µs
+2026-08-13T09:16:32.246539+00:00   INFO pegaflow_server::service: service.rs:955 Session closed: instance_id=86de1dc5-7a70-44a2-bf49-90fbf0fffe9c-939011a1f9c14be180fc0b5c246c6b8c token=1 — running cleanup
+2026-08-13T09:16:32.742959+00:00   INFO pegaflow_core: lib.rs:471 Unregistered instance: 86de1dc5-7a70-44a2-bf49-90fbf0fffe9c-939011a1f9c14be180fc0b5c246c6b8c
+2026-08-13T09:16:33.362022+00:00   INFO pegaflow_server::service: service.rs:955 Session closed: instance_id=e8d76ecc-e49b-4015-8d7f-cccefaa400cb-c795b021e07045759703f790b921c507 token=2 — running cleanup
+2026-08-13T09:16:34.004495+00:00   INFO pegaflow_core: lib.rs:471 Unregistered instance: e8d76ecc-e49b-4015-8d7f-cccefaa400cb-c795b021e07045759703f790b921c507
+2026-08-13T09:16:34.546410+00:00   INFO pegaflow_server::service: service.rs:955 Session closed: instance_id=f52ce94e-097a-4e21-ab8e-458ae6d065c7-8f191cbcbf984a98851bd32b3a70ccba token=3 — running cleanup
+2026-08-13T09:16:35.678946+00:00   INFO pegaflow_server::service: service.rs:955 Session closed: instance_id=4c6a738a-4ea3-4088-ac9a-b36fcc741ffe-054a960844db44cfb5727d9d034aa97d token=5 — running cleanup
+2026-08-13T09:16:36.035312+00:00   INFO pegaflow_server::service: service.rs:59 Session cleanup (stream closed): dropped 72 device tensors for instance f52ce94e-097a-4e21-ab8e-458ae6d065c7-8f191cbcbf984a98851bd32b3a70ccba
+2026-08-13T09:16:36.035385+00:00   INFO pegaflow_core: lib.rs:471 Unregistered instance: f52ce94e-097a-4e21-ab8e-458ae6d065c7-8f191cbcbf984a98851bd32b3a70ccba
+2026-08-13T09:16:37.207617+00:00   INFO pegaflow_server::service: service.rs:955 Session closed: instance_id=9f308603-282c-4036-ad34-32faf4246c11-7d163c5e4c404607b588674dcaac0586 token=4 — running cleanup
