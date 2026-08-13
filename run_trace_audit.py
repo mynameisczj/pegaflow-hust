@@ -36,6 +36,7 @@ CONDA_ROOT = os.environ.get("PEGAFLOW_AUDIT_CONDA_ROOT", "/root/miniconda3")
 CONDA_ENV = os.environ.get("PEGAFLOW_AUDIT_CONDA_ENV", "vllm-hust-dev")
 SERVER_PORT = int(os.environ.get("PEGAFLOW_AUDIT_SERVER_PORT", "50080"))
 VLLM_BASE_PORT = int(os.environ.get("PEGAFLOW_AUDIT_VLLM_PORT", "19000"))
+SERVER_LOG_LEVEL = os.environ.get("PEGAFLOW_AUDIT_SERVER_LOG_LEVEL", "info")
 SHARED_NS = "audit-shared"
 ISOLATED_NS_PREFIX = "audit-iso"
 NUM_INSTANCES = int(os.environ.get("PEGAFLOW_AUDIT_INSTANCES", "8"))
@@ -389,6 +390,7 @@ def start_server(pool_size="4096mb", log_dir=None, devices=None):
             "--addr", f"0.0.0.0:{SERVER_PORT}",
             "--pool-size", pool_size,
             "--devices", ",".join(str(d) for d in devices),
+            "--log-level", SERVER_LOG_LEVEL,
         ],
         stdout=open(log, "w"), stderr=subprocess.STDOUT,
         env=_server_env(),
