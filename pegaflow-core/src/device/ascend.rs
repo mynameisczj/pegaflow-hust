@@ -635,7 +635,7 @@ pub(crate) struct BatchCopyDesc {
 /// `aclrtMemcpyAsync` on failure. This matches the vllm-ascend
 /// ``swap_blocks_batch`` pattern: one kernel launch for the entire batch
 /// instead of per-block DMA overhead.
-pub fn memcpy_h2d_batch_async(
+pub(crate) fn memcpy_h2d_batch_async(
     copies: &[BatchCopyDesc],
     stream: &AscendDeviceStream,
 ) -> Result<(), String> {
@@ -645,7 +645,7 @@ pub fn memcpy_h2d_batch_async(
 /// Enqueue a batched device→host copy on the given stream.
 ///
 /// Mirrors `memcpy_h2d_batch_async` for the reverse direction.
-pub fn memcpy_d2h_batch_async(
+pub(crate) fn memcpy_d2h_batch_async(
     copies: &[BatchCopyDesc],
     stream: &AscendDeviceStream,
 ) -> Result<(), String> {
@@ -689,7 +689,7 @@ fn memcpy_batch_async(
         src_loc: if is_h2d { host_loc } else { device_loc },
         rsv: [0u8; 16],
     };
-    let mut attrs_index: usize = 0;
+    let attrs_index: usize = 0;
     let mut fail_index: usize = 0;
 
     let ret = unsafe {
