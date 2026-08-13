@@ -131,6 +131,17 @@ class SchedulerConnector:
         if not query_hashes:
             self._release_pending_query_probe(req_id)
             self._external_matched_blocks[req_id] = computed_blocks
+            # Emit the same cache_lookup line as the miss path so trace
+            # audits can attribute a fully-local prefix hit (no external
+            # transfer) instead of seeing a "missing connector event".
+            logger.info(
+                "[PegaKVConnector] req=%s cache_lookup: hit_blocks=0 "
+                "computed_blocks=%d hit_tokens=0 num_tokens=%d "
+                "lookup_us=0 total_query_hashes=0",
+                req_id,
+                computed_blocks,
+                request.num_tokens,
+            )
             return (0, False)
 
         probe = self._pending_query_probes.get(req_id)
