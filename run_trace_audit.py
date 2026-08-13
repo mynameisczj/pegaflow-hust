@@ -377,12 +377,16 @@ def _server_env() -> dict:
     return env
 
 
-def start_server(pool_size="4096mb", log_dir=None, devices=None):
+def start_server(pool_size="16gb", log_dir=None, devices=None):
     if devices is None:
         devices = list(range(NUM_INSTANCES))
     if log_dir is None:
         log_dir = LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
+    if _port_open("127.0.0.1", SERVER_PORT):
+        raise RuntimeError(
+            f"port {SERVER_PORT} already in use — a leftover pegaflow-server "
+            f"is still running; kill it before retrying")
     log = log_dir / "server.log"
     proc = subprocess.Popen(
         [
@@ -812,6 +816,18 @@ def merge_by_req_id(
                     r["prefill_time_ms"] = t["prefill_time_ms"]
                 if "queue_time_ms" in t:
                     r["queue_time_ms"] = t["queue_time_ms"]
+
+        # A fully-local prefix-cache hit (total_query_hashes == 0) never
+        # queries the backend: it has no prefetch and no DMA. It is a valid
+        # consumer outcome with hit_blocks=0, not a missing evidence event.
+        is_local_hit = cinfo.get("total_query_hashes", -1) == 0
+        if is_local_hit:
+            r["local_hit"] = True
+            r["missing_blocks"] = 0
+            r["dma_bytes"] = 0
+            r["dma_ms"] = 0.0
+            r["dma_gbps"] = 0.0
+            continue
 
         # Prefetch: exactly one server-side prefetch for this connector
         pref = prefetch_by_req.get(conn_key)
@@ -1483,7 +1499,10 @@ def main():
                         help="Independent lifecycles (default: 3)")
     parser.add_argument("--requests-per-phase", type=int, default=3,
                         help="Requests per phase (default: 3)")
-    parser.add_argument("--pool-size", type=str, default="4096mb")
+    parser.add_argument("--pool-size", type=str, default="16gb",
+                        help="Pinned pool size (default: 16gb — must hold the "
+                             "full prompt KV, else the cache evicts just-saved "
+                             "blocks and cross-instance hits go to 0)")
     parser.add_argument("--min-free-gb", type=int, default=28)
     parser.add_argument("--num-instances", type=int, default=NUM_INSTANCES,
                         help="Instances to admit per arm (default: from env / 8)")
@@ -1704,7 +1723,8 @@ def main():
             r"\[PegaKVConnector\] req=(?P<req_id>\S+)\s+"
             r"cache_lookup: hit_blocks=(?P<hit>\d+) "
             r"computed_blocks=(?P<computed>\d+) "
-            r"hit_tokens=(?P<hit_tokens>\d+) num_tokens=(?P<num_tokens>\d+)",
+            r"hit_tokens=(?P<hit_tokens>\d+) num_tokens=(?P<num_tokens>\d+)"
+            r"(?:.*?total_query_hashes=(?P<query_hashes>\d+))?",
             text,
         ):
             req_id = m.group("req_id")
@@ -1714,6 +1734,7 @@ def main():
             if entry is not None:
                 entry["occurrences"] = entry.get("occurrences", 1) + 1
                 continue
+            qh = m.group("query_hashes")
             connector_by_req[req_id] = {
                 "req_id": req_id,
                 "label": label,
@@ -1721,6 +1742,7 @@ def main():
                 "computed_blocks": int(m.group("computed")),
                 "hit_tokens": int(m.group("hit_tokens")),
                 "num_tokens": int(m.group("num_tokens")),
+                "total_query_hashes": int(qh) if qh is not None else -1,
                 "occurrences": 1,
             }
 

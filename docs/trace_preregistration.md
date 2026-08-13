@@ -46,7 +46,7 @@ Cycle 3: A(shared) → B(isolated)
 ### 2.3 Independent Service Lifecycle
 
 Each arm:
-1. Start fresh pegaflow-server (`--pool-size 4096mb --devices 0,1,2,3,4,5,6,7`)
+1. Start fresh pegaflow-server (`--pool-size 16gb --devices 0,1,2,3,4,5,6,7`)
 2. Start 8 vLLM instances (ThreadPool parallel)
 3. Run warmup (1 request, 30s seal wait)
 4. Run timed phase (3 queries × 8 instances = 24 requests, sequential round-robin, 0.5s gap, streaming SSE)
@@ -54,6 +54,14 @@ Each arm:
 6. Kill pegaflow-server
 
 Server is NOT reused across arms or cycles.
+
+**Pool sizing** (added after the host-only run): the pinned pool is NUMA-split
+(1 GiB per GPU-local node at `4gb` total), while a single ~10k-token Qwen3-8B
+prompt produces ~76 blocks ≈ 1.4 GiB of KV on the *saving* GPU's NUMA node.
+At `4096mb` the allocator reclaimed just-saved blocks to satisfy new
+allocations, so every cross-instance lookup returned `hit=0`. `16gb` gives
+4 GiB per NUMA node, which keeps the warmup KV resident and restores
+cross-instance hits (`hit=76`).
 
 ### 2.4 Fixed Parameters
 
