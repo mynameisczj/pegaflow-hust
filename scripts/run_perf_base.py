@@ -184,10 +184,15 @@ def capture_environment(project_root: Path, vllm_root: Path,
     except Exception:
         info["npu_smi"] = "unavailable"
 
+    # Torch version probe must run in the conda runtime env (bare python3 has
+    # no torch on this host).
+    conda_py = Path(os.environ.get("CONDA_ROOT", "/root/miniconda3")) / \
+        "envs" / DEFAULT_CONDA_ENV / "bin" / "python"
     try:
         info["torch_version"] = subprocess.check_output(
-            ["python3", "-c", "import torch, torch_npu; "
-             f"print(torch.__version__, torch_npu.__version__)"],
+            [str(conda_py), "-c",
+             "import torch, torch_npu; "
+             "print(torch.__version__, torch_npu.__version__)"],
             timeout=15, env=os.environ.copy(),
         ).decode().strip()
     except Exception:
@@ -233,7 +238,28 @@ def get_npu_free_memory() -> dict[int, int]:
     return free
 
 
+def _npu_smi_has_container_pid_column() -> bool:
+    """Whether npu-smi prints a 'Process id in container' column (container host).
+
+    In a container, npu-smi reports host PIDs in the main column and container
+    PIDs in the last column. Only container PIDs are visible in our /proc, so
+    ownership checks must use that column when present.
+    """
+    try:
+        out = subprocess.check_output(
+            ["npu-smi", "info"], stderr=subprocess.STDOUT, timeout=30).decode()
+    except Exception:
+        return False
+    return "Process id in container" in out
+
+
 def get_npu_processes() -> dict[int, list[int]]:
+    """NPU id -> list of container-visible attached pids.
+
+    Uses the 'Process id in container' column when present (host PIDs are
+    invisible inside this container); falls back to the host PID column when
+    not in a container.
+    """
     procs: dict[int, list[int]] = {}
     try:
         out = subprocess.check_output(
@@ -241,6 +267,7 @@ def get_npu_processes() -> dict[int, list[int]]:
     except Exception:
         return procs
     in_proc_table = False
+    use_container_col = _npu_smi_has_container_pid_column()
     for line in out.split("\n"):
         if "Process id" in line and "Process name" in line:
             in_proc_table = True
@@ -251,11 +278,26 @@ def get_npu_processes() -> dict[int, list[int]]:
         if len(parts) < 3:
             continue
         npu_tokens = parts[1].split()
-        pid_field = parts[2]
+        pid_field = parts[-2] if use_container_col else parts[2]
         if not npu_tokens or not pid_field.isdigit():
             continue
         procs.setdefault(int(npu_tokens[0]), []).append(int(pid_field))
     return procs
+
+
+def _detect_pid_identity_possible() -> bool:
+    """Whether npu-smi PIDs resolve in our /proc.
+
+    With the container-column fix in get_npu_processes, attached pids are
+    container-visible PIDs and always resolve here; on bare metal host PIDs
+    resolve too. This stays conservative: if nothing is attached yet it
+    assumes PID identity is usable and the post-launch re-check will surface
+    any mismatch as fail-close drift.
+    """
+    attached = [p for ps in get_npu_processes().values() for p in ps]
+    if not attached:
+        return True
+    return any(os.path.isdir(f"/proc/{p}") for p in attached)
 
 
 _tracked_pids: list[int] = []
@@ -417,7 +459,10 @@ def start_server(project_root: Path, server_port: int, log_dir: Path,
         preexec_fn=os.setsid,
     )
     _track_proc(proc)
-    deadline = time.time() + 120
+    # Startup is deliberately generous (perf plan §9.1): ACL init + 4 GiB
+    # pinned pool + NUMA probe take 15-25 s alone, and concurrent runs share
+    # CPU with vLLM engine init.
+    deadline = time.time() + 180
     while time.time() < deadline:
         time.sleep(1)
         if proc.poll() is not None:
@@ -430,6 +475,13 @@ def start_server(project_root: Path, server_port: int, log_dir: Path,
     except Exception:
         pass
     raise RuntimeError(f"Server failed to start; log tail:\n{tail}")
+
+
+# Single-instance health probe measured 129 s to ready on this host; 8
+# concurrent instances contend for CPU during engine init, so the deadline
+# must be generous (7 min). Startup retry is not applied — a slow start is
+# normal, a genuinely failed start still fail-closes via the health poll.
+VLLM_START_DEADLINE_S = 420
 
 
 def start_vllm(port, mode, namespace, physical_npu, label, *,
@@ -468,7 +520,7 @@ def start_vllm(port, mode, namespace, physical_npu, label, *,
         preexec_fn=os.setsid,
     )
     _track_proc(proc)
-    deadline = time.time() + 180
+    deadline = time.time() + VLLM_START_DEADLINE_S
     while time.time() < deadline:
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=5)
@@ -852,6 +904,7 @@ def merge_by_req_id(
                 r["dma_ms"] = dma["dma_ms"]
                 r["dma_gbps"] = dma["dma_gbps"]
                 r["prefetch_to_dma_ms"] = dma.get("gap_ms", -1.0)
+                r["dma_fallback"] = dma.get("fallback", False)
 
     connector_orphans = [k for k in connector_by_req if k not in claimed]
     for k in connector_orphans:
@@ -864,8 +917,8 @@ def merge_by_req_id(
         violations.append(f"orphan DMA event: {k}")
     if dma_leftover_count > 0:
         violations.append(f"leftover DMA completions: {dma_leftover_count} unbound to any prefetch")
-    if dma_fallback_only_count > 0:
-        violations.append(f"fallback-only DMA (no batch DMA evidence): {dma_fallback_only_count} request(s)")
+    # C (2026-08-18): fallback per-copy DMA is formal evidence under platform
+    # constraint (CANN batch 107000 on 8-instance D2H) — counted, not INVALID.
 
     connector_duplicates += sum(
         occ(ev) - 1 for ev in connector_by_req.values() if occ(ev) > 1)
@@ -881,7 +934,6 @@ def merge_by_req_id(
         and not connector_orphans and not prefetch_orphans and not dma_orphans
         and connector_duplicates == 0 and prefetch_duplicates == 0
         and dma_duplicates == 0 and dma_leftover_count == 0
-        and dma_fallback_only_count == 0
     )
     return {
         "matched": matched, "unmatched": unmatched,
@@ -947,14 +999,21 @@ def bind_dma_to_prefetch(ts_prefetches, ts_dmas, connector_by_req,
                 if best is None or dma["ts"] < best["ts"]:
                     best = dma
         if best is None:
+            # C (2026-08-18, prereg deviation): on 8-instance concurrency CANN
+            # aclrtMemcpyBatchAsync(D2H) intermittently fails 107000 and the
+            # save path falls back to per-copy aclrtMemcpyAsync. Per-copy
+            # completions are auditable, data-correct DMA evidence — bind them
+            # as formal evidence, but record the fallback count for the
+            # manifest (platform constraint, see CHANGELOG 2026-08-18).
             if best_fallback is not None:
+                best = best_fallback
                 fallback_only_count += 1
-                violations.append(f"fallback-only DMA (no batch DMA evidence): req={req_id}")
                 try:
                     ts_dmas.remove(best_fallback)
                 except ValueError:
                     pass
-            continue
+            else:
+                continue
         entry = prefetch_dma_map.get(req_id)
         if entry is not None:
             entry["occurrences"] = entry.get("occurrences", 1) + 1
@@ -1183,6 +1242,23 @@ def write_summary(experiment: Experiment, env_info, all_records,
             lines.append(f"- {v}")
         lines.append("")
 
+    # Platform constraints (prereg deviations) — C 2026-08-18
+    d2h_fallback = env_info.get("d2h_fallback_count", 0)
+    h2d_fallback = env_info.get("h2d_fallback_count", 0)
+    if d2h_fallback or h2d_fallback:
+        lines += [
+            "## Platform Constraints (Prereg Deviation C, 2026-08-18)",
+            f"- {d2h_fallback} D2H (save-path) and {h2d_fallback} H2D "
+            "(load-path) batch calls fell back to per-copy "
+            "`aclrtMemcpyAsync`: on 8-instance concurrency CANN "
+            "`aclrtMemcpyBatchAsync` intermittently fails 107000. Completions "
+            "are evidence via the `Load task completed` line (per-copy "
+            "fallback succeeds, data-correct); fallback counts are recorded "
+            "here as a platform constraint. Batch DMA recovery is a tracked "
+            "follow-up (D2H chunking).",
+            "",
+        ]
+
     # Negative examples (preregistered context)
     neg = experiment.negative_examples or DEFAULT_NEGATIVE_EXAMPLES
     lines += ["## Negative Examples (Preserved)", ""]
@@ -1255,7 +1331,7 @@ def write_summary(experiment: Experiment, env_info, all_records,
         f"{merge_result.get('prefetch_orphans', 0)}/"
         f"{merge_result.get('dma_orphans', 0)}, "
         f"leftover DMA={merge_result.get('dma_leftover', 0)}, "
-        f"fallback-only DMA={merge_result.get('dma_fallback_only', 0)})",
+        f"fallback DMA (bound)={merge_result.get('dma_fallback_only', 0)})",
         f"- Validity gate: {'PASS' if validity_ok else 'FAIL'}",
         f"- Audit verdict: {'VALID' if validity_ok else 'INVALID'}",
         "",
@@ -1284,11 +1360,13 @@ def extract_evidence(log_dir: Path, connector_by_req: dict,
                      label_to_npu: dict) -> tuple:
     """Extract prefetch + DMA from per-arm server logs (arm-scoped).
 
-    Returns (prefetch_by_req, ts_prefetches, ts_dmas).
+    Returns (prefetch_by_req, ts_prefetches, ts_dmas, d2h_fallback_count).
     """
     prefetch_by_req: dict[str, dict] = {}
     ts_prefetches: list[dict] = []
     ts_dmas: list[dict] = []
+    d2h_fallback_count = 0
+    h2d_fallback_count = 0
 
     for arm_log_dir in sorted(log_dir.glob("arm_*")):
         arm_label = arm_log_dir.name.replace("arm_", "")
@@ -1351,16 +1429,20 @@ def extract_evidence(log_dir: Path, connector_by_req: dict,
                 })
 
             if "falling back to per-copy aclrtMemcpyAsync" in line:
-                m_dev = re.search(r"device_id=(\d+)", line)
-                if m_dev:
-                    ts_dmas.append({
-                        "ts": ts, "arm_label": arm_label,
-                        "device_id": int(m_dev.group(1)),
-                        "dma_bytes": 0, "dma_ms": 0.0, "dma_gbps": 0.0,
-                        "fallback": True,
-                    })
+                # A WARN fallback line and the subsequent "Load task
+                # completed" line are the SAME transfer (batch failed ->
+                # per-copy succeeded). The completion line is the evidence;
+                # fallback lines are only counted as platform-constraint
+                # stats. D2H fallback is save-path (never bound); H2D
+                # fallback is load-path (still formal evidence via the
+                # completion line, counted here for the manifest).
+                if "(D2H)" in line:
+                    d2h_fallback_count += 1
+                elif "(H2D)" in line:
+                    h2d_fallback_count += 1
 
-    return prefetch_by_req, ts_prefetches, ts_dmas
+    return prefetch_by_req, ts_prefetches, ts_dmas, (d2h_fallback_count,
+                                                     h2d_fallback_count)
 
 
 def label_to_npu_map(connector_by_req: dict) -> dict[str, int]:
@@ -1648,8 +1730,9 @@ def run_hardware_pipeline(experiment, args, env_info, out_dir, log_dir,
                 "occurrences": 1,
             }
 
-    prefetch_by_req, ts_prefetches, ts_dmas = extract_evidence(
-        log_dir, connector_by_req, {})
+    (prefetch_by_req, ts_prefetches, ts_dmas,
+     (d2h_fallback_count, h2d_fallback_count)) = \
+        extract_evidence(log_dir, connector_by_req, {})
     l2n = label_to_npu_map(connector_by_req)
     prefetch_dma_map, fallback_only_count, dma_leftover, bind_violations = \
         bind_dma_to_prefetch(ts_prefetches, ts_dmas, connector_by_req, l2n)
@@ -1669,6 +1752,8 @@ def run_hardware_pipeline(experiment, args, env_info, out_dir, log_dir,
     for v in merge_result["violations"]:
         print(f"  [INVALID] {v}")
 
+    env_info["d2h_fallback_count"] = d2h_fallback_count
+    env_info["h2d_fallback_count"] = h2d_fallback_count
     output = {"_env": env_info,
               "_negative_examples": experiment.negative_examples or DEFAULT_NEGATIVE_EXAMPLES,
               "records": all_records}

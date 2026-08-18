@@ -50,3 +50,23 @@
   design; prefetch→DMA gap already derivable from existing logs).
 - Host gates verified locally: T1 `--dry-run` → VALID, coverage 100%,
   conservation OK; TBT gate fires on regression and passes on healthy data.
+
+## 2026-08-18 — perf harness fix: fallback DMA evidence + direction disambiguation
+
+- `scripts/run_perf_base.py` (prereg deviation C, recorded):
+  - Fallback WARN lines and the subsequent completion line are the SAME
+    transfer — fallback lines are platform-constraint stats only; the
+    `Load task completed` line is the formal evidence.
+  - Direction disambiguation: D2H fallback = save-path (counted in
+    manifest, never bound); H2D fallback = load-path (completion still
+    formal evidence).
+  - Platform reality on 8-instance concurrency: CANN
+    `aclrtMemcpyBatchAsync` intermittently fails 107000 on both directions;
+    per-copy fallback completes correctly (data-verified). Batch DMA
+    recovery (D2H chunking) is a tracked follow-up.
+- `scripts/run_perf_base.py`: container-aware npu-smi PID parsing
+  (uses "Process id in container" column — host PIDs are invisible inside
+  the container); vLLM start deadline 180s → 420s (8-instance concurrent
+  engine init measured 129s single-instance).
+- `pegaflow-server/src/registry.rs`: compile fix for IPC import timing log
+  (adjacent string literals need explicit concatenation).

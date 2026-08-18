@@ -215,8 +215,8 @@ impl CudaTensorRegistry {
             // pickle.loads + IPC import + metadata extraction wall time.
             let import_ms = materialize_start.elapsed().as_secs_f64() * 1000.0;
             log::info!(
-                "IPC import timing: device_id={device_id} size_bytes={size_bytes} "
-                "import_ms={import_ms:.2} (perf-t1)"
+                "IPC import timing: device_id={device_id} size_bytes={size_bytes} \
+                 import_ms={import_ms:.2} (perf-t1)"
             );
 
             let tensor_owned = tensor.unbind();
