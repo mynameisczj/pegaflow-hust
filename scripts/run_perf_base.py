@@ -133,6 +133,10 @@ class Experiment:
     concurrency: int | None = None
     batch_interval_s: float = 0.0
     warmup_first: bool = True
+    # Custom prompt construction: fn(query, query_idx) -> prompt. query_idx
+    # is -1 for the warmup seed. Default: SYSTEM_PROMPT + query (T3/T4 use
+    # this to control prefix-hit ratio and prompt length).
+    prompt_fn: object | None = None
     # Custom negative examples (defaults inherited if None)
     negative_examples: dict | None = None
 
@@ -760,9 +764,14 @@ def run_phase(experiment: Experiment, phase_name, instances, queries,
             "producer": producer,
         }
 
+    def _make_prompt(q: str, qi: int) -> str:
+        if experiment.prompt_fn is not None:
+            return experiment.prompt_fn(q, qi)
+        return f"{SYSTEM_PROMPT}\n\nUser: {q}\n\nAssistant:"
+
     if warmup_first and len(instances) >= 1:
         warmup_spec, warmup_proc = instances[0]
-        prompt = f"{SYSTEM_PROMPT}\n\nUser: {queries[0]}\n\nAssistant:"
+        prompt = _make_prompt(queries[0], -1)
         r = send_one_streaming(warmup_spec["port"], prompt, model_path)
         records.append(_mk_record(warmup_spec, queries[0], r, -1, -1, True))
         print(f"    [WARMUP] {warmup_spec['label']} "
@@ -773,7 +782,7 @@ def run_phase(experiment: Experiment, phase_name, instances, queries,
     if experiment.concurrency and experiment.concurrency > 1:
         records.extend(_run_phase_concurrent(
             experiment, phase_name, instances, queries, model_path,
-            cycle, t0, _mk_record))
+            cycle, t0, _mk_record, _make_prompt))
     else:
         idx = 0
         for qi in range(len(queries)):
@@ -781,7 +790,7 @@ def run_phase(experiment: Experiment, phase_name, instances, queries,
                 if proc.poll() is not None:
                     continue
                 q = queries[qi]
-                prompt = f"{SYSTEM_PROMPT}\n\nUser: {q}\n\nAssistant:"
+                prompt = _make_prompt(q, qi)
                 r = send_one_streaming(spec["port"], prompt, model_path)
                 records.append(_mk_record(spec, q, r, idx, qi, False))
                 status = (f"TTFT={r['ttft_s']:.4f}s" if r["ok"]
@@ -794,7 +803,7 @@ def run_phase(experiment: Experiment, phase_name, instances, queries,
 
 
 def _run_phase_concurrent(experiment, phase_name, instances, queries,
-                          model_path, cycle, t0, _mk_record):
+                          model_path, cycle, t0, _mk_record, _make_prompt=None):
     """Semaphore-limited concurrent sends with fixed batch interval (T2)."""
     records: list[dict] = []
     sem = threading.Semaphore(experiment.concurrency)
@@ -810,7 +819,8 @@ def _run_phase_concurrent(experiment, phase_name, instances, queries,
 
     def _send(task):
         spec, q, i, qi = task
-        prompt = f"{SYSTEM_PROMPT}\n\nUser: {q}\n\nAssistant:"
+        prompt = (_make_prompt(q, qi) if _make_prompt is not None
+                  else f"{SYSTEM_PROMPT}\n\nUser: {q}\n\nAssistant:")
         with sem:
             r = send_one_streaming(spec["port"], prompt, model_path)
         with rlock:
@@ -1373,11 +1383,14 @@ def write_summary(experiment: Experiment, env_info, all_records,
         and not drift_violations
     )
     extra_violations: list[str] = []
-    for name, gate_fn in experiment.extra_gates:
-        try:
-            extra_violations.extend(gate_fn(all_records, merge_result))
-        except Exception as e:
-            extra_violations.append(f"{name} gate raised: {e}")
+    if not env_info.get("dry_run"):
+        # Dry-run synthesizes 100%-hit records; experiment-specific gates
+        # (hit-rate etc.) are exercised by unit tests, not the dry pipeline.
+        for name, gate_fn in experiment.extra_gates:
+            try:
+                extra_violations.extend(gate_fn(all_records, merge_result))
+            except Exception as e:
+                extra_violations.append(f"{name} gate raised: {e}")
     validity_ok = base_ok and evidence_ok and not extra_violations
     if merge_result.get("coverage_pct", 0) < 100.0:
         lines.append(

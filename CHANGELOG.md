@@ -129,3 +129,18 @@
   075403 (same, chunked-batch defense), 083342 (fallback direction
   disambiguation). Manifests document the INVALID verdicts; raw logs
   gitignored. Superseded by the VALID runs (090625, 104618).
+
+## 2026-08-18 — T3/T4 runners
+
+- `scripts/run_perf_t3_hitrate.py`: hit-rate sensitivity (50/75/90/100%).
+  Prefix-ratio manipulation: warmup seeds full prompt, Q0 test keeps the
+  first ratio% identical + distinct filler (total length unchanged). Gate:
+  measured hit_blocks/76 within +/-5pp of target, else INVALID.
+- `scripts/run_perf_t4_len.py`: prompt-length gradient (1k/4k/8k/16k tokens)
+  via block repetition (chars/4 proxy).
+- `scripts/run_perf_base.py`: `Experiment.prompt_fn(query, query_idx)` for
+  custom prompt construction (query_idx -1 = warmup seed); dry-run skips
+  experiment-specific gates (synthetic records are 100%-hit; gates are
+  unit-tested instead).
+- Host gates: dry-run VALID for both runners; T3 hitrate gate unit-tested
+  (passes at target, fails off-target).
