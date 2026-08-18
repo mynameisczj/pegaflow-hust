@@ -86,3 +86,18 @@
   concurrency); completions data-correct. D2H chunking tracked.
 - Earlier runs today (072129/075403/083342) INVALID — retained locally as
   negative evidence of the platform constraint, not committed.
+
+## 2026-08-18 — T1 rerun: batch DMA restored (allocator contract)
+
+- `results/perf-t1/20260818-104618/` — T1 rerun with
+  `PYTORCH_NPU_ALLOC_CONF=expandable_segments:True` + chunked batch defense.
+  Audit verdict **VALID**, 0 batch fallbacks (platform-constraint section
+  absent from manifest), conservation OK, 144 records.
+- Q0: shared 0.328s vs isolated 0.937s, prefill saved +609.1ms, DMA cost
+  90.5ms (vs 120.1ms under per-copy fallback in run 20260818-090625) → **GO**,
+  CI [531.6, 535.5]ms excludes 0.
+- DMA cost now matches the 20260813 5-instance VALID run (89ms) — batch
+  aclrtMemcpyBatchAsync (5472 copies, 71-101ms) fully restored.
+- Confirms root cause: torch_npu default-allocator memory is not batch-DMA
+  capable; expandable_segments memory is (comment "expandable_segments is
+  not DMA-capable" is outdated).
