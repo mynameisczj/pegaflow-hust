@@ -120,3 +120,12 @@
   empty req_id no longer duplicate-matches all connector keys; startup
   retry (1x) for slow engine init; kill_tracked kills descendant processes
   (vLLM EngineCore spawns a new process group); launch timeout 900s.
+
+## 2026-08-18 — INVALID runs archived as platform-constraint negative evidence
+
+- `results/perf-t1/20260818-{072129,075403,083342}/` — three INVALID T1
+  runs preserved per prereg §8 (negative-example retention): 072129
+  (default-allocator batch 107000 -> fallback evidence rules),
+  075403 (same, chunked-batch defense), 083342 (fallback direction
+  disambiguation). Manifests document the INVALID verdicts; raw logs
+  gitignored. Superseded by the VALID runs (090625, 104618).
