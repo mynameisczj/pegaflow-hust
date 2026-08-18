@@ -492,6 +492,11 @@ def start_vllm(port, mode, namespace, physical_npu, label, *,
     env = os.environ.copy()
     env["PYTHONHASHSEED"] = "0"
     env["ASCEND_RT_VISIBLE_DEVICES"] = str(physical_npu)
+    # Allocator contract (2026-08-18): aclrtMemcpyBatchAsync fails 107000 on
+    # torch_npu default-allocator memory; expandable_segments memory is
+    # DMA-capable and matches the 20260813 VALID run (which set this conf).
+    # Override via PYTORCH_NPU_ALLOC_CONF when a different allocator is wanted.
+    env.setdefault("PYTORCH_NPU_ALLOC_CONF", "expandable_segments:True")
     if use_pegaflow:
         if namespace:
             env["PEGAFLOW_NAMESPACE"] = namespace
