@@ -70,3 +70,19 @@
   engine init measured 129s single-instance).
 - `pegaflow-server/src/registry.rs`: compile fix for IPC import timing log
   (adjacent string literals need explicit concatenation).
+
+## 2026-08-18 — T1 baseline: first 8-instance VALID matched trace
+
+- `results/perf-t1/20260818-090625/` — T1 baseline, 3 cycles × 8 instances
+  × 3 queries, Qwen3-8B, vllm-hust@HEAD, commit 021473b. Audit verdict
+  **VALID** (100% coverage, conservation OK, 0 violations, 144 records).
+  Raw logs gitignored (`results/perf-t1/*/logs/`); manifest committed.
+- Q0 (cross-instance): shared median 0.356s vs isolated 0.938s —
+  prefill saved +581.7ms, DMA cost 120.1ms → **GO** (CI excludes 0).
+- Q2: +58.3ms vs 3.5ms → **GO**. Q1: BREAK-EVEN (local prefix hit, expected).
+- TBT p95: 18.8ms both arms (no decode-path regression; TBT gate PASS).
+- Platform constraint recorded (prereg deviation C): 216 D2H + 42 H2D
+  batch calls fell back to per-copy (CANN batch 107000 on 8-instance
+  concurrency); completions data-correct. D2H chunking tracked.
+- Earlier runs today (072129/075403/083342) INVALID — retained locally as
+  negative evidence of the platform constraint, not committed.
