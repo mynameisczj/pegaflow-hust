@@ -22,6 +22,9 @@
     pd/nixl helpers awaiting an NPU e2e gate).
 - `ruff.toml`: drop excludes for moved benchmark scripts; add
   `_archived_scripts/` to `extend-exclude`.
+- Archive `benchmark_report.md` → `_archived_docs/` (historical benchmark
+  results superseded by the 20260813 VALID matched trace; see
+  `_archived_docs/README.md`).
 - Active scripts now: `run_trace_audit.py`, `test_trace_audit_dryrun.py`
   (repo root), `scripts/build-wheel.sh`, `scripts/check.sh`.
 - Docs (outside repo, not committed): NPU migration status
