@@ -1,0 +1,53 @@
+2026-08-18T14:46:04.838175+00:00   INFO pegaflow_server: lib.rs:480 Starting pega-engine-server v0.23.3
+2026-08-18T14:46:05.687790+00:00   INFO pegaflow_server: lib.rs:319 Ascend ACL runtime initialized, device 0 set as current
+2026-08-18T14:46:05.688010+00:00   INFO pegaflow_server::check_ascend_version: check_ascend_version.rs:40 Ascend preflight: minimum required version 1.16.0
+2026-08-18T14:46:05.688089+00:00   INFO pegaflow_server::check_ascend_version: check_ascend_version.rs:52 Ascend preflight: runtime version 1.17.0 detected
+2026-08-18T14:46:05.688132+00:00   INFO pegaflow_server: lib.rs:498 Using specified device(s): [0, 1, 2, 3, 4, 5, 6, 7]
+2026-08-18T14:46:14.579225+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 0 in 0.01s
+2026-08-18T14:46:15.330905+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 1 in 0.75s
+2026-08-18T14:46:16.070491+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 2 in 0.74s
+2026-08-18T14:46:16.819843+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 3 in 0.75s
+2026-08-18T14:46:17.594899+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 4 in 0.77s
+2026-08-18T14:46:18.343536+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 5 in 0.75s
+2026-08-18T14:46:19.148139+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 6 in 0.80s
+2026-08-18T14:46:19.898762+00:00   INFO pegaflow_server: lib.rs:397 Initialized context for device 7 in 0.75s
+2026-08-18T14:46:19.899006+00:00   INFO pegaflow_server: lib.rs:507 Device runtime initialized for 8 device(s): [0, 1, 2, 3, 4, 5, 6, 7]
+2026-08-18T14:46:19.899364+00:00   INFO pegaflow_server: lib.rs:528 Creating PegaEngine with pinned memory pool: 16.00 GiB (17179869184 bytes), hugepages=false
+2026-08-18T14:46:19.927767+00:00   INFO pegaflow_server: lib.rs:446 Prometheus metrics exporter enabled
+2026-08-18T14:46:19.928122+00:00   INFO opentelemetry: metrics.rs:29  name="MeterProvider.GlobalSet" message=Global meter provider is set. Meters can now be created using global::meter() or global::meter_with_scope().
+2026-08-18T14:46:25.750770+00:00   INFO pegaflow_common::numa: numa.rs:650 === Device-NUMA Topology ===
+2026-08-18T14:46:25.750947+00:00   INFO pegaflow_common::numa: numa.rs:651 NUMA nodes: 8
+2026-08-18T14:46:25.750998+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 0 -> NUMA6
+2026-08-18T14:46:25.751024+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 1 -> NUMA0
+2026-08-18T14:46:25.751044+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 2 -> NUMA6
+2026-08-18T14:46:25.751064+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 3 -> NUMA0
+2026-08-18T14:46:25.751083+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 4 -> NUMA4
+2026-08-18T14:46:25.751102+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 5 -> NUMA2
+2026-08-18T14:46:25.751120+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 6 -> NUMA4
+2026-08-18T14:46:25.751139+00:00   INFO pegaflow_common::numa: numa.rs:659   Device 7 -> NUMA2
+2026-08-18T14:46:25.751211+00:00   INFO pegaflow_core: lib.rs:163 Auto-enabling NUMA-aware memory allocation for 4 GPU-local NUMA nodes (8 CPU NUMA nodes detected)
+2026-08-18T14:46:25.751239+00:00   INFO pegaflow_core::storage: mod.rs:150 Creating NUMA-aware pinned pools for 4 nodes
+2026-08-18T14:46:25.751275+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:547 Creating NUMA-aware pools: total=16.0 GiB, nodes=4, per_node=4.0 GiB, shards_per_node=1
+2026-08-18T14:46:25.753006+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:203 Allocating pinned memory pool with aclrtMallocHost mapped pages
+2026-08-18T14:46:25.753230+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:262 Ascend pinned pool on NUMA node NUMA0 → using device 3
+2026-08-18T14:46:25.931750+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:213 Pinned pool: backing_size=4.0 GiB, unit_size=512 B, max_units=8388608, allocatable_size=4.0 GiB
+2026-08-18T14:46:26.285664+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:580 Created pinned pool on NUMA0: capacity=4.0 GiB
+2026-08-18T14:46:26.288420+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:203 Allocating pinned memory pool with aclrtMallocHost mapped pages
+2026-08-18T14:46:26.288605+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:262 Ascend pinned pool on NUMA node NUMA2 → using device 5
+2026-08-18T14:46:26.479197+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:213 Pinned pool: backing_size=4.0 GiB, unit_size=512 B, max_units=8388608, allocatable_size=4.0 GiB
+2026-08-18T14:46:26.832037+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:580 Created pinned pool on NUMA2: capacity=4.0 GiB
+2026-08-18T14:46:26.833824+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:203 Allocating pinned memory pool with aclrtMallocHost mapped pages
+2026-08-18T14:46:26.834038+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:262 Ascend pinned pool on NUMA node NUMA4 → using device 6
+2026-08-18T14:46:27.009413+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:213 Pinned pool: backing_size=4.0 GiB, unit_size=512 B, max_units=8388608, allocatable_size=4.0 GiB
+2026-08-18T14:46:27.355974+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:580 Created pinned pool on NUMA4: capacity=4.0 GiB
+2026-08-18T14:46:27.357404+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:203 Allocating pinned memory pool with aclrtMallocHost mapped pages
+2026-08-18T14:46:27.357483+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:262 Ascend pinned pool on NUMA node NUMA6 → using device 0
+2026-08-18T14:46:27.536179+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:213 Pinned pool: backing_size=4.0 GiB, unit_size=512 B, max_units=8388608, allocatable_size=4.0 GiB
+2026-08-18T14:46:27.869276+00:00   INFO pegaflow_core::pinned_pool: pinned_pool.rs:580 Created pinned pool on NUMA6: capacity=4.0 GiB
+2026-08-18T14:46:27.870386+00:00   INFO pegaflow_server: lib.rs:688 Background GC task started (interval=60s, inflight_max_age=5m, failed_remote_max_age=5m)
+2026-08-18T14:46:30.286192+00:00   INFO pegaflow_core::storage::write_path: write_path.rs:99 Insert worker shutting down, 0 inflight blocks remaining
+Error: Os { code: 98, kind: AddrInUse, message: "Address already in use" }
+pybind11::handle::dec_ref() is being called while the GIL is either not held or invalid. Please see https://pybind11.readthedocs.io/en/stable/advanced/misc.html#common-sources-of-global-interpreter-lock-errors for debugging advice.
+If you are convinced there is no bug in your code, you can #define PYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF to disable this check. In that case you have to ensure this #define is consistently used for all translation units linked into a given pybind11 extension, otherwise there will be ODR violations. The failing pybind11::handle::dec_ref() call was triggered on a pybind11_type object.
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  pybind11::handle::dec_ref() PyGILState_Check() failure.

@@ -1,0 +1,168 @@
+INFO 08-18 14:46:57 [__init__.py:44] Available plugins for group vllm.platform_plugins:
+INFO 08-18 14:46:57 [__init__.py:46] - ascend -> vllm_ascend:register
+INFO 08-18 14:46:57 [__init__.py:49] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+INFO 08-18 14:46:57 [__init__.py:246] Platform plugin ascend is activated
+INFO 08-18 14:46:57 [platform.py:60] Breakable cudagraph is force disabled on Ascend because DeepSeek V4 PIECEWISE cudagraph is not supported yet.
+INFO 08-18 14:47:05 [api_utils.py:285] Running Ascend torch_npu preflight before vLLM engine startup
+2026-08-18 14:47:21,070 - 2242016 - ServiceProfiler - INFO - VLLM_USE_V1 not set, auto-detected via vLLM 0.23.1.post1.dev576+g4b7f49349.empty: default 1
+INFO 08-18 14:47:22 [__init__.py:112] Registered model loader `<class 'vllm_ascend.model_loader.netloader.netloader.ModelNetLoaderElastic'>` with load format `netloader`
+INFO 08-18 14:47:22 [__init__.py:112] Registered model loader `<class 'vllm_ascend.model_loader.rfork.rfork_loader.RForkModelLoader'>` with load format `rfork`
+(APIServer pid=2242016) INFO 08-18 14:47:22 [api_utils.py:470] 
+(APIServer pid=2242016) INFO 08-18 14:47:22 [api_utils.py:470]        █     █     █▄   ▄█
+(APIServer pid=2242016) INFO 08-18 14:47:22 [api_utils.py:470]  ▄▄ ▄█ █     █     █ ▀▄▀ █  version 0.23.1.post1.dev576+g4b7f49349
+(APIServer pid=2242016) INFO 08-18 14:47:22 [api_utils.py:470]   █▄█▀ █     █     █     █  model   /workspace/HUST/models/Qwen3-8B
+(APIServer pid=2242016) INFO 08-18 14:47:22 [api_utils.py:470]    ▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀
+(APIServer pid=2242016) INFO 08-18 14:47:22 [api_utils.py:470] 
+(APIServer pid=2242016) INFO 08-18 14:47:22 [api_utils.py:404] non-default args: {'model_tag': '/workspace/HUST/models/Qwen3-8B', 'port': 19003, 'model': '/workspace/HUST/models/Qwen3-8B', 'dtype': 'float16', 'max_model_len': 16384, 'gpu_memory_utilization': 0.85, 'max_num_seqs': 4, 'kv_transfer_config': KVTransferConfig(kv_connector='PegaKVConnector', engine_id='d3d704ed-74d3-4ab4-adba-38308a7fdc97', kv_buffer_device='npu', kv_buffer_size=1000000000.0, kv_role='kv_both', kv_rank=None, kv_parallel_size=1, kv_ip='127.0.0.1', kv_port=14579, kv_connector_extra_config={'pegaflow.mode': 'read_write', 'pegaflow.transfer_backend': 'ascend_direct'}, kv_connector_module_path='pegaflow.connector', enable_permute_local_kv=False, kv_load_failure_policy='fail')}
+(APIServer pid=2242016) INFO 08-18 14:47:22 [model.py:606] Resolved architecture: Qwen3ForCausalLM
+(APIServer pid=2242016) WARNING 08-18 14:47:22 [model.py:2074] Casting torch.bfloat16 to torch.float16.
+(APIServer pid=2242016) INFO 08-18 14:47:22 [model.py:1736] Using max model len 16384
+(APIServer pid=2242016) INFO 08-18 14:47:22 [vllm.py:1075] Asynchronous scheduling is enabled.
+(APIServer pid=2242016) INFO 08-18 14:47:22 [kernel.py:286] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+(APIServer pid=2242016) INFO 08-18 14:47:22 [utils.py:203] No quantization signature detected from model files for "/workspace/HUST/models/Qwen3-8B". The model will be loaded as float. To force a quantization method, pass "--quantization <method>" explicitly.
+(APIServer pid=2242016) WARNING 08-18 14:47:22 [platform.py:1219] GPU-specific parameter is not supported on Ascend. parameter=disable_cascade_attn, value=True, action: resetting to False.
+(APIServer pid=2242016) INFO 08-18 14:47:22 [ascend_config.py:914] Dynamic EPLB is False
+(APIServer pid=2242016) INFO 08-18 14:47:22 [ascend_config.py:915] The number of redundant experts is 0
+(APIServer pid=2242016) INFO 08-18 14:47:22 [utils.py:1458] Block size is set to 128 if prefix cache or chunked prefill is enabled.
+(APIServer pid=2242016) INFO 08-18 14:47:22 [platform.py:929] Set PYTORCH_NPU_ALLOC_CONF=expandable_segments:True
+(APIServer pid=2242016) WARNING 08-18 14:47:22 [vllm.py:1572] Turning off hybrid kv cache manager because `--kv-transfer-config` selects a KV connector that does not support it. Impact: hybrid SSM models (e.g. Jamba, Bamba) require HMA and will fail at startup without it; models with sliding window attention will run with reduced performance. To add HMA support to a KV connector, subclass `SupportsHMA` defined in kv_connector/v1/base.py (for MultiConnector, all child connectors must support HMA).
+(APIServer pid=2242016) INFO 08-18 14:47:22 [compilation.py:313] Enabled custom fusions: norm_quant, act_quant
+INFO 08-18 14:47:37 [__init__.py:44] Available plugins for group vllm.platform_plugins:
+INFO 08-18 14:47:37 [__init__.py:46] - ascend -> vllm_ascend:register
+INFO 08-18 14:47:37 [__init__.py:49] All plugins in this group will be loaded. Set `VLLM_PLUGINS` to control which plugins to load.
+INFO 08-18 14:47:37 [__init__.py:246] Platform plugin ascend is activated
+INFO 08-18 14:47:37 [platform.py:60] Breakable cudagraph is force disabled on Ascend because DeepSeek V4 PIECEWISE cudagraph is not supported yet.
+(EngineCore pid=2249398) 2026-08-18 14:47:46,879 - 2249398 - ServiceProfiler - INFO - VLLM_USE_V1 not set, auto-detected via vLLM 0.23.1.post1.dev576+g4b7f49349.empty: default 1
+(EngineCore pid=2249398) INFO 08-18 14:47:46 [__init__.py:112] Registered model loader `<class 'vllm_ascend.model_loader.netloader.netloader.ModelNetLoaderElastic'>` with load format `netloader`
+(EngineCore pid=2249398) INFO 08-18 14:47:46 [__init__.py:112] Registered model loader `<class 'vllm_ascend.model_loader.rfork.rfork_loader.RForkModelLoader'>` with load format `rfork`
+(EngineCore pid=2249398) INFO 08-18 14:47:46 [core.py:130] Initializing a V1 LLM engine (v0.23.1.post1.dev576+g4b7f49349) with config: model='/workspace/HUST/models/Qwen3-8B', speculative_config=None, tokenizer='/workspace/HUST/models/Qwen3-8B', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.float16, max_seq_len=16384, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=True, quantization=None, quantization_config=None, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=npu, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False, jit_monitor_mode='warn', jit_monitor_verbose=False), seed=0, served_model_name=/workspace/HUST/models/Qwen3-8B, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'vllm_ascend.compilation.compiler_interface.AscendCompiler', 'custom_ops': ['all'], 'ir_enable_torch_wrap': False, 'splitting_ops': ['vllm::unified_attention_with_output', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::qwen_gdn_attention_core', 'vllm::gdn_attention_core_xpu', 'vllm::olmo_hybrid_gdn_full_forward', 'vllm::kda_attention', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::deepseek_v4_attention', 'vllm::hpc_rope_norm_forward', 'vllm::unified_kv_cache_update', 'vllm::unified_mla_kv_cache_update', 'vllm::mla_forward', 'vllm::dsa_forward'], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'compile_sizes': [], 'compile_ranges_endpoints': [2048], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': False, 'alignment_asserts': False, 'scalar_asserts': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': False, 'fuse_rope_kvcache_cat_mla': False, 'fuse_act_padding': False}, 'max_cudagraph_capture_size': 4, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': True, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, enable_cutedsl_warmup=True, moe_backend='auto', linear_backend='auto')
+(EngineCore pid=2249398) [transformers] `Qwen2VLImageProcessor` requires torchvision (not installed); falling back to `Qwen2VLImageProcessorPil` for backward compatibility. Install torchvision to use the default backend, or import `Qwen2VLImageProcessorPil` directly to silence this warning.
+(EngineCore pid=2249398) INFO 08-18 14:47:48 [ascend_config.py:914] Dynamic EPLB is False
+(EngineCore pid=2249398) INFO 08-18 14:47:48 [ascend_config.py:915] The number of redundant experts is 0
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322] EngineCore failed to start.
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322] Traceback (most recent call last):
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]   File "/workspace/HUST/vllm-hust/vllm/v1/engine/core.py", line 1291, in run_engine_core
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     engine_core = EngineCoreProc(*args, engine_index=dp_rank, **kwargs)
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]   File "/workspace/HUST/vllm-hust/vllm/tracing/otel.py", line 178, in sync_wrapper
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     return func(*args, **kwargs)
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]            ^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]   File "/workspace/HUST/vllm-hust/vllm/v1/engine/core.py", line 1050, in __init__
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     super().__init__(
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]   File "/workspace/HUST/vllm-hust/vllm/v1/engine/core.py", line 139, in __init__
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     self.model_executor = executor_class(vllm_config)
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]   File "/workspace/HUST/vllm-hust/vllm/tracing/otel.py", line 178, in sync_wrapper
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     return func(*args, **kwargs)
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]            ^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]   File "/workspace/HUST/vllm-hust/vllm/v1/executor/abstract.py", line 109, in __init__
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     self._init_executor()
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]   File "/workspace/HUST/vllm-hust/vllm/v1/executor/uniproc_executor.py", line 63, in _init_executor
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     self.driver_worker.init_device()
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]   File "/workspace/HUST/vllm-hust/vllm/v1/worker/worker_base.py", line 364, in init_device
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     self.worker.init_device()  # type: ignore
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     ^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]   File "/workspace/HUST/vllm-ascend-hust/vllm_ascend/worker/worker.py", line 702, in init_device
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     self.device = self._init_device()
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]                   ^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]   File "/workspace/HUST/vllm-ascend-hust/vllm_ascend/worker/worker.py", line 665, in _init_device
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322]     raise ValueError(
+(EngineCore pid=2249398) ERROR 08-18 14:47:51 [core.py:1322] ValueError: Free memory on device (45.15/60.96 GiB) on startup is less than desired GPU memory utilization (0.85, 51.81 GiB). Decrease GPU memory utilization or reduce GPU memory used by other processes.
+(EngineCore pid=2249398) Process EngineCore:
+(EngineCore pid=2249398) Traceback (most recent call last):
+(EngineCore pid=2249398)   File "/root/miniconda3/envs/vllm-hust-dev/lib/python3.11/multiprocessing/process.py", line 314, in _bootstrap
+(EngineCore pid=2249398)     self.run()
+(EngineCore pid=2249398)   File "/root/miniconda3/envs/vllm-hust-dev/lib/python3.11/multiprocessing/process.py", line 108, in run
+(EngineCore pid=2249398)     self._target(*self._args, **self._kwargs)
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-ascend-hust/vllm_ascend/patch/platform/patch_balance_schedule.py", line 699, in run_engine_core
+(EngineCore pid=2249398)     return _ORIGINAL_RUN_ENGINE_CORE(*args, dp_rank=dp_rank, local_dp_rank=local_dp_rank, **kwargs)
+(EngineCore pid=2249398)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/core.py", line 1326, in run_engine_core
+(EngineCore pid=2249398)     raise e
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/core.py", line 1291, in run_engine_core
+(EngineCore pid=2249398)     engine_core = EngineCoreProc(*args, engine_index=dp_rank, **kwargs)
+(EngineCore pid=2249398)                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-hust/vllm/tracing/otel.py", line 178, in sync_wrapper
+(EngineCore pid=2249398)     return func(*args, **kwargs)
+(EngineCore pid=2249398)            ^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/core.py", line 1050, in __init__
+(EngineCore pid=2249398)     super().__init__(
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/core.py", line 139, in __init__
+(EngineCore pid=2249398)     self.model_executor = executor_class(vllm_config)
+(EngineCore pid=2249398)                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-hust/vllm/tracing/otel.py", line 178, in sync_wrapper
+(EngineCore pid=2249398)     return func(*args, **kwargs)
+(EngineCore pid=2249398)            ^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-hust/vllm/v1/executor/abstract.py", line 109, in __init__
+(EngineCore pid=2249398)     self._init_executor()
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-hust/vllm/v1/executor/uniproc_executor.py", line 63, in _init_executor
+(EngineCore pid=2249398)     self.driver_worker.init_device()
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-hust/vllm/v1/worker/worker_base.py", line 364, in init_device
+(EngineCore pid=2249398)     self.worker.init_device()  # type: ignore
+(EngineCore pid=2249398)     ^^^^^^^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-ascend-hust/vllm_ascend/worker/worker.py", line 702, in init_device
+(EngineCore pid=2249398)     self.device = self._init_device()
+(EngineCore pid=2249398)                   ^^^^^^^^^^^^^^^^^^^
+(EngineCore pid=2249398)   File "/workspace/HUST/vllm-ascend-hust/vllm_ascend/worker/worker.py", line 665, in _init_device
+(EngineCore pid=2249398)     raise ValueError(
+(EngineCore pid=2249398) ValueError: Free memory on device (45.15/60.96 GiB) on startup is less than desired GPU memory utilization (0.85, 51.81 GiB). Decrease GPU memory utilization or reduce GPU memory used by other processes.
+(APIServer pid=2242016) Traceback (most recent call last):
+(APIServer pid=2242016)   File "/root/miniconda3/envs/vllm-hust-dev/bin/vllm", line 6, in <module>
+(APIServer pid=2242016)     sys.exit(main())
+(APIServer pid=2242016)              ^^^^^^
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/entrypoints/cli/main.py", line 99, in main
+(APIServer pid=2242016)     args.dispatch_function(args)
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/entrypoints/cli/serve.py", line 148, in cmd
+(APIServer pid=2242016)     uvloop.run(run_server(args))
+(APIServer pid=2242016)   File "/root/miniconda3/envs/vllm-hust-dev/lib/python3.11/site-packages/uvloop/__init__.py", line 92, in run
+(APIServer pid=2242016)     return runner.run(wrapper())
+(APIServer pid=2242016)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=2242016)   File "/root/miniconda3/envs/vllm-hust-dev/lib/python3.11/asyncio/runners.py", line 118, in run
+(APIServer pid=2242016)     return self._loop.run_until_complete(task)
+(APIServer pid=2242016)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=2242016)   File "uvloop/loop.pyx", line 1518, in uvloop.loop.Loop.run_until_complete
+(APIServer pid=2242016)   File "/root/miniconda3/envs/vllm-hust-dev/lib/python3.11/site-packages/uvloop/__init__.py", line 48, in wrapper
+(APIServer pid=2242016)     return await main
+(APIServer pid=2242016)            ^^^^^^^^^^
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/entrypoints/openai/api_server.py", line 706, in run_server
+(APIServer pid=2242016)     await run_server_worker(listen_address, sock, args, **uvicorn_kwargs)
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/entrypoints/openai/api_server.py", line 720, in run_server_worker
+(APIServer pid=2242016)     async with build_async_engine_client(
+(APIServer pid=2242016)   File "/root/miniconda3/envs/vllm-hust-dev/lib/python3.11/contextlib.py", line 210, in __aenter__
+(APIServer pid=2242016)     return await anext(self.gen)
+(APIServer pid=2242016)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/entrypoints/openai/api_server.py", line 100, in build_async_engine_client
+(APIServer pid=2242016)     async with build_async_engine_client_from_engine_args(
+(APIServer pid=2242016)   File "/root/miniconda3/envs/vllm-hust-dev/lib/python3.11/contextlib.py", line 210, in __aenter__
+(APIServer pid=2242016)     return await anext(self.gen)
+(APIServer pid=2242016)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/entrypoints/openai/api_server.py", line 136, in build_async_engine_client_from_engine_args
+(APIServer pid=2242016)     async_llm = AsyncLLM.from_vllm_config(
+(APIServer pid=2242016)                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/async_llm.py", line 218, in from_vllm_config
+(APIServer pid=2242016)     return cls(
+(APIServer pid=2242016)            ^^^^
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/async_llm.py", line 147, in __init__
+(APIServer pid=2242016)     self.engine_core = EngineCoreClient.make_async_mp_client(
+(APIServer pid=2242016)                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/tracing/otel.py", line 178, in sync_wrapper
+(APIServer pid=2242016)     return func(*args, **kwargs)
+(APIServer pid=2242016)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/core_client.py", line 132, in make_async_mp_client
+(APIServer pid=2242016)     return AsyncMPClient(*client_args)
+(APIServer pid=2242016)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/tracing/otel.py", line 178, in sync_wrapper
+(APIServer pid=2242016)     return func(*args, **kwargs)
+(APIServer pid=2242016)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/core_client.py", line 967, in __init__
+(APIServer pid=2242016)     super().__init__(
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/core_client.py", line 573, in __init__
+(APIServer pid=2242016)     with launch_core_engines(
+(APIServer pid=2242016)   File "/root/miniconda3/envs/vllm-hust-dev/lib/python3.11/contextlib.py", line 144, in __exit__
+(APIServer pid=2242016)     next(self.gen)
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/utils.py", line 1213, in launch_core_engines
+(APIServer pid=2242016)     wait_for_engine_startup(
+(APIServer pid=2242016)   File "/workspace/HUST/vllm-hust/vllm/v1/engine/utils.py", line 1272, in wait_for_engine_startup
+(APIServer pid=2242016)     raise RuntimeError(
+(APIServer pid=2242016) RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}
+(APIServer pid=2242016) [ERROR] 2026-08-18-14:47:57 (PID:2242016, Device:-1, RankID:-1) ERR99999 UNKNOWN applicaiton exception

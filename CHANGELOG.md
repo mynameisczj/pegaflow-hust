@@ -101,3 +101,22 @@
 - Confirms root cause: torch_npu default-allocator memory is not batch-DMA
   capable; expandable_segments memory is (comment "expandable_segments is
   not DMA-capable" is outdated).
+
+## 2026-08-18 — T2 concurrency gradient: 9/9 combos VALID, no contention point
+
+- `results/perf-t2-c{1,4,8}-i{0,50,200}/` — 9 combos, one cycle each,
+  semaphore-limited concurrent sends. All **VALID**, 0 batch fallbacks.
+- Q0 (cross-instance) per combo:
+  - concurrency 1: saved ~611ms, DMA ~92ms
+  - concurrency 4: saved ~577ms, DMA ~122ms
+  - concurrency 8: saved ~556ms, DMA ~147ms
+- Batch interval (0/50/200ms) has no measurable effect; DMA cost scales
+  with concurrency only. All combos **GO** — no contention knee within the
+  scanned range (8-way DMA 147ms is far below the ~556ms prefill saving).
+- Safe operating region: concurrency <= 8 (full scanned range). Burst
+  negative example (32 requests, unlimited semaphore, +56%) still stands
+  as the pathological boundary.
+- Harness robustness fixes landed during the sweep (all host-verified):
+  empty req_id no longer duplicate-matches all connector keys; startup
+  retry (1x) for slow engine init; kill_tracked kills descendant processes
+  (vLLM EngineCore spawns a new process group); launch timeout 900s.

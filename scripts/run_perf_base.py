@@ -346,13 +346,35 @@ def check_admission_drift(
             continue
         for pid in attached:
             try:
-                owned = pid in tracked_pgids_set or pgid_of(pid) in tracked_pgids_set
+                owned = (_owned_by_tracked(pid, tracked_pgids_set)
+                         or pid in tracked_pgids_set
+                         or pgid_of(pid) in tracked_pgids_set)
             except (ProcessLookupError, PermissionError):
                 owned = False
             if not owned:
                 violations.append(
                     f"NPU{npu} owner drift: foreign pid={pid} attached to admitted device")
     return violations
+
+
+def _owned_by_tracked(pid: int, tracked_pgids_set: set[int]) -> bool:
+    """Ancestor-chain ownership: vLLM spawns EngineCore in a NEW process
+    group (multiprocessing spawn), so pgid matching alone false-positives.
+    Walk /proc/{pid}/stat ppid chain — owned if any ancestor is one of our
+    tracked process groups."""
+    seen: set[int] = set()
+    cur = pid
+    while cur and cur not in seen:
+        seen.add(cur)
+        try:
+            stat = Path(f"/proc/{cur}/stat").read_text()
+            ppid = int(stat.split()[3])
+        except Exception:
+            return False
+        if ppid in tracked_pgids_set:
+            return True
+        cur = ppid
+    return False
 
 
 def _detect_pid_identity_possible() -> bool:
@@ -370,7 +392,39 @@ def _track_proc(proc: subprocess.Popen) -> None:
     _tracked_pids.append(proc.pid)
 
 
+def _descendants(pid: int) -> list[int]:
+    """All descendant pids of pid (recursive). vLLM spawns EngineCore in a new
+    process group, so group-kill alone leaves it behind; it must be found via
+    the ppid chain."""
+    out: list[int] = []
+    frontier = [pid]
+    while frontier:
+        parent = frontier.pop()
+        try:
+            children = subprocess.check_output(
+                ["ps", "-o", "pid=", "--ppid", str(parent)], timeout=5
+            ).decode().split()
+        except Exception:
+            continue
+        for c in children:
+            cid = int(c)
+            out.append(cid)
+            frontier.append(cid)
+    return out
+
+
 def kill_tracked() -> None:
+    # Descendants first (they may have reparented), then the tracked groups.
+    seen: set[int] = set()
+    for pid in list(_tracked_pids):
+        for d in _descendants(pid):
+            if d in seen:
+                continue
+            seen.add(d)
+            try:
+                os.kill(d, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
     for pid in list(_tracked_pids):
         try:
             os.kill(-pid, signal.SIGTERM)
@@ -546,25 +600,39 @@ def launch_all_instances(specs, model_path, log_dir, server_port,
         gmu = max(0.15, min(0.85, (fm - 4096) / HBM_TOTAL_MB))
         label = spec["label"]
         print(f"    → [{label}] NPU{npu} gmu={gmu:.2f} ...")
-        try:
-            proc = start_vllm(
-                spec["port"], spec["mode"], spec["namespace"],
-                npu, label, model_path=model_path,
-                log_dir=log_dir, server_port=server_port,
-                conda_root=conda_root, conda_env=conda_env,
-                gpu_memory_utilization=gmu,
-                use_pegaflow=spec.get("use_pegaflow", True),
-            )
-            with rlock:
-                running.append((spec, proc))
-            print(f"    → [{label}] ready ({len(running)}/{len(specs)})")
-        except Exception as e:
-            print(f"    → [{label}] FAILED: {e}")
+        # One startup retry: under 8-instance concurrency engine init is
+        # occasionally slow (>420s); the retry only covers launch, never the
+        # run itself — fail-close still applies if both attempts fail.
+        for attempt in (1, 2):
+            try:
+                proc = start_vllm(
+                    spec["port"], spec["mode"], spec["namespace"],
+                    npu, label, model_path=model_path,
+                    log_dir=log_dir, server_port=server_port,
+                    conda_root=conda_root, conda_env=conda_env,
+                    gpu_memory_utilization=gmu,
+                    use_pegaflow=spec.get("use_pegaflow", True),
+                )
+                with rlock:
+                    running.append((spec, proc))
+                print(f"    → [{label}] ready ({len(running)}/{len(specs)})")
+                return
+            except Exception as e:
+                print(f"    → [{label}] attempt {attempt} FAILED: {e}")
+                if attempt == 1:
+                    time.sleep(5)
+        print(f"    → [{label}] FAILED after 2 attempts")
 
+    # Timeout must exceed start_vllm's internal 420s deadline; a timeout here
+    # returns partial results and the caller's < num_instances check fail-closes.
     with ThreadPoolExecutor(max_workers=len(specs)) as ex:
         futures = [ex.submit(_start_one, s) for s in specs]
-        for _ in as_completed(futures, timeout=300):
-            pass
+        try:
+            for _ in as_completed(futures, timeout=900):
+                pass
+        except TimeoutError:
+            print(f"  [note] instance launch timed out after 900s; "
+                  f"{sum(1 for f in futures if f.done())}/{len(futures)} finished")
     return running
 
 
@@ -791,7 +859,8 @@ def merge_by_req_id(
         if not r.get("producer"):
             continue
         client_req_id = r.get("req_id", "")
-        keys = [k for k in connector_by_req if client_req_id in k]
+        keys = [k for k in connector_by_req
+                if client_req_id and client_req_id in k]
         if len(keys) > 1:
             violations.append(
                 f"duplicate connector event (producer): req={client_req_id} keys={keys}")
@@ -818,7 +887,10 @@ def merge_by_req_id(
 
         total_consumers += 1
         client_req_id = r.get("req_id", "")
-        keys = [k for k in connector_by_req if client_req_id in k]
+        # Empty req_id (abort placeholder records) must never match all keys —
+        # `"" in key` is vacuously True.
+        keys = [k for k in connector_by_req
+                if client_req_id and client_req_id in k]
 
         if not keys:
             unmatched += 1
