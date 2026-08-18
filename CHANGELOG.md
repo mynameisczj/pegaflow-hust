@@ -30,3 +30,23 @@
 - Docs (outside repo, not committed): NPU migration status
   (`/workspace/HUST/npu_migration_status.md`), perf test plan
   (`/workspace/HUST/pegaflow-perf-test-plan.md`).
+
+## 2026-08-18 — perf harness W1 (standardized test flow)
+
+- Add `scripts/run_perf_base.py`: shared harness extracted from
+  `run_trace_audit.py` — run-id artifacts, env snapshot (incl. torch/torch_npu
+  versions + ascend commit), matched AB/BA arms, independent lifecycle,
+  fail-close evidence gates, per-query-class paired analysis, TBT/TPOT token
+  timestamps, `--dry-run` host gate, `--verify-repro` reproducibility gate
+  (perf plan §9.1).
+- Add `scripts/run_perf_t1_baseline.py`: T1 experiment (Qwen3-8B, 8 instances,
+  3 cycles) with TBT stability gate (shared p95 ≤ isolated p95 × 1.10).
+- Instrument `python/pegaflow/npu_ipc_wrapper.py`: `exported_at` / `imported_at`
+  wall-clock timestamps (backward-compatible 6-tuple pickles still load).
+- Instrument `pegaflow-server/src/registry.rs`: `IPC import timing` log line in
+  `materialize_tensor` (import_ms per tensor). Rust change not compile-verified
+  locally (no cargo on host) — CI `cargo check (ascend)` is the gate.
+- Deferred: prefetch queue-depth instrumentation (needs server-side metrics
+  design; prefetch→DMA gap already derivable from existing logs).
+- Host gates verified locally: T1 `--dry-run` → VALID, coverage 100%,
+  conservation OK; TBT gate fires on regression and passes on healthy data.

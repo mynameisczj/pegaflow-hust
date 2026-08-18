@@ -15,6 +15,7 @@ import contextlib
 import ctypes
 import os
 import threading
+import time
 
 import torch
 
@@ -234,6 +235,9 @@ class NpuIPCWrapper:
         self.stride = tensor.stride()
         self.storage_offset = tensor.storage_offset()
         self.device_index = global_device
+        # Perf instrumentation (perf plan): wall-clock export time, carried
+        # through pickle so the server can measure export→import latency.
+        self.exported_at: float | None = time.time()
 
     def to_tensor(self) -> torch.Tensor:
         """Reconstruct a real torch.Tensor from the NPU IPC handle.
@@ -251,6 +255,8 @@ class NpuIPCWrapper:
 
         import torch_npu
         storage = torch_npu._C._new_shared_npu(*self._handle)
+        # Perf instrumentation (perf plan): wall-clock import time.
+        self.imported_at: float | None = time.time()
 
         t = torch.tensor([], device=f"npu:{self.device_index}", dtype=self.dtype)
         st_offset = getattr(self, "storage_offset", 0)
@@ -273,17 +279,20 @@ class NpuIPCWrapper:
             self.stride,
             self.storage_offset,
             self.device_index,
+            getattr(self, "exported_at", None),
         )
 
     def __setstate__(self, state):
-        (
-            self._handle,
-            self.dtype,
-            self.shape,
-            self.stride,
-            self.storage_offset,
-            self.device_index,
-        ) = state
+        # Backward compatible: 6-tuple (pre-instrumentation) or 7-tuple.
+        if len(state) == 6:
+            (self._handle, self.dtype, self.shape, self.stride,
+             self.storage_offset, self.device_index) = state
+            self.exported_at = None
+        else:
+            (self._handle, self.dtype, self.shape, self.stride,
+             self.storage_offset, self.device_index,
+             self.exported_at) = state
+        self.imported_at = None
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, NpuIPCWrapper):

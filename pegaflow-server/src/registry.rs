@@ -198,6 +198,7 @@ impl CudaTensorRegistry {
                 cuda.into()
             };
 
+            let materialize_start = std::time::Instant::now();
             let py_bytes = PyBytes::new(py, wrapper_bytes);
             let wrapper = pickle.call_method1("loads", (py_bytes,))?;
             let tensor = wrapper.call_method0("to_tensor")?;
@@ -209,6 +210,14 @@ impl CudaTensorRegistry {
 
             let storage = tensor.call_method0("untyped_storage")?;
             let size_bytes: usize = storage.call_method0("nbytes")?.extract()?;
+
+            // Perf instrumentation (perf plan): IPC import cost per tensor —
+            // pickle.loads + IPC import + metadata extraction wall time.
+            let import_ms = materialize_start.elapsed().as_secs_f64() * 1000.0;
+            log::info!(
+                "IPC import timing: device_id={device_id} size_bytes={size_bytes} "
+                "import_ms={import_ms:.2} (perf-t1)"
+            );
 
             let tensor_owned = tensor.unbind();
 
