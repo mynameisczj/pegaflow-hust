@@ -1572,6 +1572,14 @@ def run_experiment(experiment: Experiment, argv: list[str] | None = None,
     """Drive one experiment end to end (or host-only --dry-run)."""
     parser = argparse.ArgumentParser(description=experiment.title)
     add_common_args(parser)
+    # Experiment-declared defaults win unless the CLI overrides them.
+    parser.set_defaults(
+        cycles=experiment.cycles,
+        requests_per_phase=experiment.requests_per_phase,
+        num_instances=experiment.num_instances,
+        pool_size=experiment.pool_size,
+        min_free_gb=experiment.min_free_gb,
+    )
     args = parser.parse_args(argv)
 
     project_root = DEFAULT_PROJECT_ROOT

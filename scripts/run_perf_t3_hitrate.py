@@ -51,11 +51,14 @@ def _make_ratio_prompts(ratio: int):
 
 def _hitrate_gate(target: int):
     def gate(all_records, merge_result):
+        # Cross-instance hits only: vLLM-local prefix-cache hits (local_hit)
+        # are 100% by construction and would bias the mean.
         shared = [r for r in all_records
                   if r.get("phase") == "shared" and r.get("ok")
-                  and not r.get("producer") and r.get("query_idx") == 0]
+                  and not r.get("producer") and r.get("query_idx") == 0
+                  and not r.get("local_hit")]
         if not shared:
-            return ["T3 gate: no shared Q0 records"]
+            return ["T3 gate: no cross-instance shared Q0 records"]
         hits = [r.get("hit_blocks", 0) for r in shared]
         measured = (sum(hits) / len(hits) / HIT_BLOCKS_EXPECTED) * 100.0
         if abs(measured - target) > 5.0:
