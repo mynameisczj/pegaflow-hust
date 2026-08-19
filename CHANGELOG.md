@@ -163,3 +163,17 @@
 - Harness fixes landed during T3 bring-up: experiment-declared defaults
   override CLI, consumer floor scales with experiment size, per-instance
   prompt variants, density-matched filler.
+
+## 2026-08-19 — T4 prompt-length gradient: 4/4 VALID, break-even between 1k and 4k
+
+- `results/perf-t4-l{1,4,8,16}k/` — length gradient, one cycle each. All
+  **VALID** (hit-rate gate n/a; standard gates clean).
+- Q0 per length:
+  - 1k: saved -21.2ms, DMA 8.7ms → **BREAK-EVEN (negative)**
+  - 4k: saved +95.0ms, DMA 32.0ms → GO
+  - 8k: saved +382.6ms, DMA 59.6ms → GO
+  - 16k: saved +929.9ms, DMA 108.9ms → GO
+- Break-even length threshold lies between 1k and 4k tokens: below it the
+  prefill saving is too small to cover DMA + overhead (same logic as the
+  MLA negative example). DMA scales sub-linearly with length (8.7 -> 109ms
+  for 1k -> 16k).
