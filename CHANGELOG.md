@@ -144,3 +144,22 @@
   unit-tested instead).
 - Host gates: dry-run VALID for both runners; T3 hitrate gate unit-tested
   (passes at target, fails off-target).
+
+## 2026-08-19 — T3 hit-rate sweep: 4/4 VALID, monotone, break-even below 50%
+
+- `results/perf-t3-h{50,75,90,100}/` — prefix-ratio manipulation
+  (shuffled-block filler, per-instance variants), one cycle each. All
+  **VALID**; hit-rate gate passed at each target (prereg deviation D:
+  first Q0 is the warmup instance's own repeat and is excluded from the
+  cross-instance hit-rate statistic).
+- Q0 per ratio:
+  - 50%: saved +288.1ms, DMA 46.3ms
+  - 75%: saved +439.1ms, DMA 70.0ms
+  - 90%: saved +595.3ms, DMA 80.3ms
+  - 100%: saved +608.9ms, DMA 95.6ms
+- Monotone in both directions; DMA scales with hit blocks (46->96ms).
+  All combos GO — break-even threshold lies below 50% hit rate (not
+  reached in this sweep).
+- Harness fixes landed during T3 bring-up: experiment-declared defaults
+  override CLI, consumer floor scales with experiment size, per-instance
+  prompt variants, density-matched filler.
