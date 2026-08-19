@@ -177,3 +177,20 @@
   prefill saving is too small to cover DMA + overhead (same logic as the
   MLA negative example). DMA scales sub-linearly with length (8.7 -> 109ms
   for 1k -> 16k).
+
+## 2026-08-19 — T5 shared-resource pressure, 2x2: 4/4 VALID, no erosion
+
+- `results/perf-t5-{a,b,c,d}/` — 2x2 (gmu 0.85/0.95 x external load on/off),
+  4 experiment instances x 3 cycles. All **VALID**, 0 request failures.
+- Q0 per combo:
+  - a baseline: saved +614.0ms, DMA 89.2ms, TBT p95 19.0ms
+  - b external load (4 placeholder instances): saved +603.3ms,
+    DMA 99.4ms, TBT p95 19.5ms
+  - c gmu 0.95: saved +616.9ms, DMA 88.0ms, TBT p95 18.9ms
+  - d full pressure: saved +619.4ms, DMA 88.4ms, TBT p95 20.7ms
+- Prereg deviation F (2026-08-19): pressure calibration was too weak —
+  external load only moved DMA +10ms and gmu 0.95 has no effect at 10k
+  tokens (KV 1.4GB vs 53GB pool). The result stands as multi-tenant
+  robustness evidence (PegaFlow benefit is NOT eroded by co-tenant load),
+  not as a pressure finding. Stronger pressure (long prompts, higher
+  concurrency under gmu 0.95) is a follow-up.
