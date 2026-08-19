@@ -59,7 +59,7 @@ def main():
     for target in lengths:
         prompt = _prompt_for_tokens(target)
 
-        def prompt_fn(q, qi, _p=prompt):
+        def prompt_fn(q, qi, npu, _p=prompt):
             return f"{_p}\n\nUser: {q}\n\nAssistant:"
 
         exp = Experiment(
