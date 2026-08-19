@@ -764,14 +764,14 @@ def run_phase(experiment: Experiment, phase_name, instances, queries,
             "producer": producer,
         }
 
-    def _make_prompt(q: str, qi: int) -> str:
+    def _make_prompt(q: str, qi: int, npu: int = -1) -> str:
         if experiment.prompt_fn is not None:
-            return experiment.prompt_fn(q, qi)
+            return experiment.prompt_fn(q, qi, npu)
         return f"{SYSTEM_PROMPT}\n\nUser: {q}\n\nAssistant:"
 
     if warmup_first and len(instances) >= 1:
         warmup_spec, warmup_proc = instances[0]
-        prompt = _make_prompt(queries[0], -1)
+        prompt = _make_prompt(queries[0], -1, warmup_spec["physical_npu"])
         r = send_one_streaming(warmup_spec["port"], prompt, model_path)
         records.append(_mk_record(warmup_spec, queries[0], r, -1, -1, True))
         print(f"    [WARMUP] {warmup_spec['label']} "
@@ -790,7 +790,7 @@ def run_phase(experiment: Experiment, phase_name, instances, queries,
                 if proc.poll() is not None:
                     continue
                 q = queries[qi]
-                prompt = _make_prompt(q, qi)
+                prompt = _make_prompt(q, qi, spec["physical_npu"])
                 r = send_one_streaming(spec["port"], prompt, model_path)
                 records.append(_mk_record(spec, q, r, idx, qi, False))
                 status = (f"TTFT={r['ttft_s']:.4f}s" if r["ok"]
@@ -819,7 +819,7 @@ def _run_phase_concurrent(experiment, phase_name, instances, queries,
 
     def _send(task):
         spec, q, i, qi = task
-        prompt = (_make_prompt(q, qi) if _make_prompt is not None
+        prompt = (_make_prompt(q, qi, spec["physical_npu"]) if _make_prompt is not None
                   else f"{SYSTEM_PROMPT}\n\nUser: {q}\n\nAssistant:")
         with sem:
             r = send_one_streaming(spec["port"], prompt, model_path)

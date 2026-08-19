@@ -32,21 +32,24 @@ RATIOS = [50, 75, 90, 100]
 
 
 def _make_ratio_prompts(ratio: int):
-    """Return (warmup_prompt, test_prompt).
+    """Return (warmup_prompt, per-npu test_prompts).
 
-    Warmup seeds the full system block (~10k tokens). The test prompt keeps
-    the first `ratio`% of the system block identical (those blocks hit) and
-    replaces the remainder with distinct filler of the same length (those
-    blocks miss) — total length stays ~10k so prefill cost is comparable
-    while only the hit fraction varies.
+    Warmup seeds the full system block (~10k tokens). Each instance's Q0
+    keeps the first `ratio`% of the system block identical (those blocks
+    hit) and replaces the remainder with a per-instance DISTINCT filler
+    (those blocks miss) — so an earlier instance's save can never make a
+    later instance's Q0 a full hit. Total length stays ~10k so prefill
+    cost is comparable while only the hit fraction varies.
     """
     full = SYSTEM_PROMPT
     suffix = "\n\nUser: What is the capital of France?\n\nAssistant:"
     cut = int(len(full) * ratio / 100)
     filler_len = len(full) - cut
-    filler = ("DIFFERENT CONTENT PARAGRAPH. " * (filler_len // 28 + 1))[:filler_len]
-    test = full[:cut] + filler + suffix
-    return full + suffix, test
+    tests = []
+    for npu in range(8):
+        filler = (f"DIFFERENT CONTENT PARAGRAPH NPU{npu}. " * (filler_len // 30 + 1))[:filler_len]
+        tests.append(full[:cut] + filler + suffix)
+    return full + suffix, tests
 
 
 def _hitrate_gate(target: int):
@@ -90,14 +93,15 @@ def main():
         ratios = [int(r) for r in ratio_arg.split(",")]
 
     for ratio in ratios:
-        warmup_p, test_p = _make_ratio_prompts(ratio)
+        warmup_p, tests = _make_ratio_prompts(ratio)
 
-        def prompt_fn(q, qi, _r=ratio, _w=warmup_p, _t=test_p):
-            # qi == -1 is the warmup seed (full prompt); Q0 is the test prompt.
+        def prompt_fn(q, qi, npu, _r=ratio, _w=warmup_p, _tests=tests):
+            # qi == -1 is the warmup seed (full prompt); Q0 uses the
+            # per-instance test prompt (shared prefix + distinct filler).
             if qi == -1:
                 return _w
             if qi == 0:
-                return _t
+                return _tests[npu % len(_tests)]
             return f"{SYSTEM_PROMPT}\n\nUser: {q}\n\nAssistant:"
 
         exp = Experiment(
