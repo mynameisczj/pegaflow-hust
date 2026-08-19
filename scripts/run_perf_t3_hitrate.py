@@ -26,7 +26,7 @@ from run_perf_base import Experiment, run_experiment, SYSTEM_PROMPT
 
 # One system block ~= 250 tokens; full seed = 38 blocks (~10k tokens).
 _BLOCKS = 38
-HIT_BLOCKS_EXPECTED = 76  # Qwen3-8B 76-block KV footprint at 10k tokens
+BLOCK_SIZE = 128  # vLLM block_size for Qwen3-8B
 
 RATIOS = [50, 75, 90, 100]
 
@@ -62,8 +62,16 @@ def _hitrate_gate(target: int):
                   and not r.get("local_hit")]
         if not shared:
             return ["T3 gate: no cross-instance shared Q0 records"]
-        hits = [r.get("hit_blocks", 0) for r in shared]
-        measured = (sum(hits) / len(hits) / HIT_BLOCKS_EXPECTED) * 100.0
+        # Hit rate = hit_blocks / actual blocks (num_tokens/block_size),
+        # not a fixed expected block count — prompt lengths vary.
+        ratios = []
+        for r in shared:
+            blocks = r.get("num_tokens_total", 0) / BLOCK_SIZE
+            if blocks > 0:
+                ratios.append(r.get("hit_blocks", 0) / blocks)
+        if not ratios:
+            return ["T3 gate: no blocks to measure"]
+        measured = (sum(ratios) / len(ratios)) * 100.0
         if abs(measured - target) > 5.0:
             return [f"T3 gate FAILED: measured hit rate {measured:.1f}% "
                     f"vs target {target}% (deviation > 5pp)"]
