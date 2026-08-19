@@ -69,11 +69,16 @@ def _hitrate_gate(target: int):
         shared = [r for r in all_records
                   if r.get("phase") == "shared" and r.get("ok")
                   and not r.get("producer") and r.get("query_idx") == 0
-                  and not r.get("local_hit")
-                  # The warmup instance's own Q0 is a same-instance repeat
-                  # (vLLM local prefix behavior, not cross-instance) — its
-                  # connector query only covers the unseeded tail.
-                  and r.get("npu") != 0]
+                  and not r.get("local_hit")]
+        if not shared:
+            return ["T3 gate: no cross-instance shared Q0 records"]
+        # The FIRST Q0 is the warmup instance's own repeat request (its
+        # connector query only covers the unseeded tail; vLLM local-prefix
+        # behavior makes it non-representative of cross-instance hits).
+        # Exclude it regardless of which NPU it landed on (admission order
+        # varies). Prereg deviation D, 2026-08-19.
+        first_idx = min(r.get("req_idx", 10**9) for r in shared)
+        shared = [r for r in shared if r.get("req_idx") != first_idx]
         if not shared:
             return ["T3 gate: no cross-instance shared Q0 records"]
         # Hit rate = hit_blocks / actual blocks (num_tokens/block_size),
