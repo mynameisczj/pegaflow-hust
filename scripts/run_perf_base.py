@@ -137,6 +137,9 @@ class Experiment:
     # is -1 for the warmup seed. Default: SYSTEM_PROMPT + query (T3/T4 use
     # this to control prefix-hit ratio and prompt length).
     prompt_fn: object | None = None
+    # GPU memory utilization override: None = dynamic from free HBM (default);
+    # a fixed value (e.g. 0.95) pins every instance's gmu (T5 pressure arm).
+    gmu: float | None = None
     # Custom negative examples (defaults inherited if None)
     negative_examples: dict | None = None
 
@@ -594,14 +597,15 @@ def start_vllm(port, mode, namespace, physical_npu, label, *,
 
 
 def launch_all_instances(specs, model_path, log_dir, server_port,
-                         conda_root, conda_env):
+                         conda_root, conda_env, gmu_override=None):
     running: list[tuple[dict, subprocess.Popen]] = []
     rlock = threading.Lock()
 
     def _start_one(spec):
         npu = spec["physical_npu"]
         fm = get_npu_free_memory().get(npu, -1)
-        gmu = max(0.15, min(0.85, (fm - 4096) / HBM_TOTAL_MB))
+        gmu = (gmu_override if gmu_override is not None
+               else max(0.15, min(0.85, (fm - 4096) / HBM_TOTAL_MB)))
         label = spec["label"]
         print(f"    → [{label}] NPU{npu} gmu={gmu:.2f} ...")
         # One startup retry: under 8-instance concurrency engine init is
@@ -1713,7 +1717,9 @@ def run_hardware_pipeline(experiment, args, env_info, out_dir, log_dir,
                     for i in admitted
                 ]
                 running = launch_all_instances(specs, model_path, log_dir,
-                                               server_port, conda_root, conda_env)
+                                               server_port, conda_root,
+                                               conda_env,
+                                               gmu_override=experiment.gmu)
                 if len(running) < len(specs):
                     print(f"  [INVALID] Only {len(running)}/{len(specs)} "
                           f"instances started. Arm {arm_label} ABORTED.")
