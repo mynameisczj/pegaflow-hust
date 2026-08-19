@@ -45,9 +45,19 @@ def _make_ratio_prompts(ratio: int):
     suffix = "\n\nUser: What is the capital of France?\n\nAssistant:"
     cut = int(len(full) * ratio / 100)
     filler_len = len(full) - cut
+    # Filler must tokenize at the SAME density as the system block, or the
+    # total token count drifts and the hit fraction misses its target.
+    # Shuffling the block's own words keeps density identical while the
+    # content is distinct (never prefix-hits).
+    import random
+    words = SYSTEM_PROMPT.split()
     tests = []
     for npu in range(8):
-        filler = (f"DIFFERENT CONTENT PARAGRAPH NPU{npu}. " * (filler_len // 30 + 1))[:filler_len]
+        rng = random.Random(npu + 1)
+        shuffled = list(words)
+        rng.shuffle(shuffled)
+        filler = (" ".join(shuffled) * (filler_len // (len(" ".join(shuffled))) + 1))
+        filler = filler[:filler_len]
         tests.append(full[:cut] + filler + suffix)
     return full + suffix, tests
 
