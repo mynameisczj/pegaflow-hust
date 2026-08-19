@@ -1373,8 +1373,12 @@ def write_summary(experiment: Experiment, env_info, all_records,
         ]
 
     # Validity manifest (coverage + conservation — fail-close)
+    # Consumer floor scales with experiment size: (instances - warmup) *
+    # cycles consumers per arm. T1 (3x8): 21; T3 (1x8): 7.
+    min_consumers = max(1, (experiment.num_instances - 1) * experiment.cycles)
     base_ok = (
-        len(shared) >= 12 and len(isolated) >= 12 and len(all_records) > 0
+        len(shared) >= min_consumers and len(isolated) >= min_consumers
+        and len(all_records) > 0
     )
     evidence_ok = (
         merge_result.get("conservation_ok", False)
