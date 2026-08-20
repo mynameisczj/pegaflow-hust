@@ -692,45 +692,64 @@ fn memcpy_batch_async(
     let attrs_index: usize = 0;
     let mut fail_index: usize = 0;
 
-    let ret = unsafe {
-        aclrtMemcpyBatchAsync(
-            dst_ptrs.as_mut_ptr(),
-            dst_maxs.as_mut_ptr(),
-            src_ptrs.as_mut_ptr(),
-            sizes.as_mut_ptr(),
-            n,
-            &attr,
-            &attrs_index,
-            1,
-            &mut fail_index,
-            stream.stream,
-        )
-    };
+    // Chunked submission (2026-08-18): on 8-instance concurrency CANN
+    // aclrtMemcpyBatchAsync intermittently fails 107000 on large batches
+    // (~5.5k copies). Submitting in fixed-size chunks keeps the batch
+    // benefit while bounding per-call size; a failed chunk falls back to
+    // per-copy for that chunk only.
+    const MEMCPY_BATCH_CHUNK: usize = 512;
+    let mut chunk_fallback = 0usize;
+    for (chunk_idx, chunk) in copies.chunks(MEMCPY_BATCH_CHUNK).enumerate() {
+        let cn = chunk.len();
+        let off = chunk_idx * MEMCPY_BATCH_CHUNK;
+        let ret = unsafe {
+            aclrtMemcpyBatchAsync(
+                dst_ptrs.as_mut_ptr().add(off),
+                dst_maxs.as_mut_ptr().add(off),
+                src_ptrs.as_mut_ptr().add(off),
+                sizes.as_mut_ptr().add(off),
+                cn,
+                &attr,
+                &attrs_index,
+                1,
+                &mut fail_index,
+                stream.stream,
+            )
+        };
 
-    if ret != ACL_ERROR_NONE {
-        let desc = acl_error_description(ret);
-        // Fall back to per-copy aclrtMemcpyAsync for non-DMA-memory errors
-        if ret == ACL_ERROR_DMA_NOT_SUPPORTED {
-            return Err(format!(
-                "aclrtMemcpyBatchAsync({}) failed: error {ret} ({desc}). \
-                 Enable camem_allocator (COMPILE_CUSTOM_KERNELS=1) for DMA-capable \
-                 KV cache allocations.",
-                if is_h2d { "H2D" } else { "D2H" }
-            ));
-        }
-        // For other errors, try per-copy fallback
-        log::warn!(
-            "aclrtMemcpyBatchAsync({}) failed: error {ret} ({desc}) at index {fail_index} — \
-             falling back to per-copy aclrtMemcpyAsync",
-            if is_h2d { "H2D" } else { "D2H" }
-        );
-        for copy in copies {
-            if is_h2d {
-                memcpy_h2d_async(copy.dst, copy.src as *const u8, copy.size, stream)?;
-            } else {
-                memcpy_d2h_async(copy.dst as *mut u8, copy.src, copy.size, stream)?;
+        if ret != ACL_ERROR_NONE {
+            let desc = acl_error_description(ret);
+            if ret == ACL_ERROR_DMA_NOT_SUPPORTED {
+                return Err(format!(
+                    "aclrtMemcpyBatchAsync({}) failed: error {ret} ({desc}). \
+                     Enable camem_allocator (COMPILE_CUSTOM_KERNELS=1) for DMA-capable \
+                     KV cache allocations.",
+                    if is_h2d { "H2D" } else { "D2H" }
+                ));
+            }
+            // Chunk-level per-copy fallback (data-correct, auditable).
+            chunk_fallback += 1;
+            log::warn!(
+                "aclrtMemcpyBatchAsync({}) chunk {} failed: error {ret} ({desc}) at index \
+                 {fail_index} — falling back to per-copy aclrtMemcpyAsync for this chunk",
+                if is_h2d { "H2D" } else { "D2H" },
+                chunk_idx
+            );
+            for copy in chunk {
+                if is_h2d {
+                    memcpy_h2d_async(copy.dst, copy.src as *const u8, copy.size, stream)?;
+                } else {
+                    memcpy_d2h_async(copy.dst as *mut u8, copy.src, copy.size, stream)?;
+                }
             }
         }
+    }
+    if chunk_fallback > 0 {
+        log::warn!(
+            "aclrtMemcpyBatchAsync({}): {chunk_fallback}/{} chunks fell back to per-copy",
+            if is_h2d { "H2D" } else { "D2H" },
+            copies.chunks(MEMCPY_BATCH_CHUNK).count()
+        );
     }
     Ok(())
 }
