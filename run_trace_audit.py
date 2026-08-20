@@ -21,22 +21,31 @@ from datetime import datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path("/workspace/HUST/pegaflow-hust")
+# Environment resolution — the runner is relocatable: paths come from env vars
+# with auto-detected defaults, not a single machine's hardcoded layout.
+PROJECT_ROOT = Path(os.environ.get(
+    "PEGAFLOW_AUDIT_ROOT", str(Path(__file__).resolve().parent)))
 _RUN_ID = time.strftime("%Y%m%d-%H%M%S")
-LOG_DIR = Path(f"/workspace/HUST/pegaflow-hust/results/trace-audit/{_RUN_ID}/logs")
-OUT_DIR = Path(f"/workspace/HUST/pegaflow-hust/results/trace-audit/{_RUN_ID}")
+LOG_DIR = PROJECT_ROOT / "results" / "trace-audit" / _RUN_ID / "logs"
+OUT_DIR = PROJECT_ROOT / "results" / "trace-audit" / _RUN_ID
 
-MODEL_PATH = "/workspace/HUST/models/Qwen3-8B"
-VLLM_HUST_ROOT = Path("/workspace/HUST/vllm-hust")  # runtime vLLM checkout (A5)
-SERVER_PORT = 50080
-VLLM_BASE_PORT = 19000
+MODEL_PATH = os.environ.get("PEGAFLOW_AUDIT_MODEL", "/data/shared-models/Qwen3-8B")
+VLLM_HUST_ROOT = Path(os.environ.get(
+    "PEGAFLOW_AUDIT_VLLM_ROOT", str(Path.home() / "vllm-hust")))  # runtime vLLM (A5)
+CONDA_ROOT = os.environ.get("PEGAFLOW_AUDIT_CONDA_ROOT", "/root/miniconda3")
+CONDA_ENV = os.environ.get("PEGAFLOW_AUDIT_CONDA_ENV", "vllm-hust-dev")
+SERVER_PORT = int(os.environ.get("PEGAFLOW_AUDIT_SERVER_PORT", "50080"))
+VLLM_BASE_PORT = int(os.environ.get("PEGAFLOW_AUDIT_VLLM_PORT", "19000"))
+SERVER_LOG_LEVEL = os.environ.get("PEGAFLOW_AUDIT_SERVER_LOG_LEVEL", "info")
 SHARED_NS = "audit-shared"
 ISOLATED_NS_PREFIX = "audit-iso"
-NUM_INSTANCES = 8
+NUM_INSTANCES = int(os.environ.get("PEGAFLOW_AUDIT_INSTANCES", "8"))
 HBM_TOTAL_MB = 65536
 MIN_FREE_HBM_MB = 28 * 1024
 DMA_TIME_WINDOW_S = 30.0           # max seconds between prefetch and DMA
 ADMISSION_POLL_INTERVAL_S = 10.0   # mid-arm admission drift poll cadence
+
+_SERVER_BIN = os.environ.get("PEGAFLOW_AUDIT_SERVER_BIN", "")
 
 _SYS_BLOCK = (
     "You are an expert AI assistant with deep knowledge across many domains "
@@ -167,7 +176,14 @@ def get_npu_free_memory() -> dict[int, int]:
 
 
 def get_npu_processes() -> dict[int, list[int]]:
-    """Parse npu-smi process table: NPU id -> attached pids."""
+    """Parse npu-smi process table: NPU id -> attached pids.
+
+    Table format (4 pipe-delimited columns):
+        | NPU  Chip | Process id | Process name | Process memory(MB) |
+        | 5       0 | 498465     |              | 59111              |
+    Rows for empty devices read "No running processes found in NPU N" and
+    carry no numeric pid, so they are skipped by the digit guard.
+    """
     procs: dict[int, list[int]] = {}
     try:
         out = subprocess.check_output(
@@ -180,11 +196,17 @@ def get_npu_processes() -> dict[int, list[int]]:
         if "Process id" in line and "Process name" in line:
             in_proc_table = True
             continue
-        if not in_proc_table:
+        if not in_proc_table or not line.startswith("|"):
             continue
-        m = re.match(r"\|\s*(\d+)\s+\d+\s+\|\s+(\d+)\s+(\S+)\s+\d+\s+\|", line)
-        if m:
-            procs.setdefault(int(m.group(1)), []).append(int(m.group(2)))
+        parts = [p.strip() for p in line.split("|")]
+        # parts: ["", "NPU chip", "pid", "name", "memory", ""]
+        if len(parts) < 3:
+            continue
+        npu_tokens = parts[1].split()
+        pid_field = parts[2]
+        if not npu_tokens or not pid_field.isdigit():
+            continue
+        procs.setdefault(int(npu_tokens[0]), []).append(int(pid_field))
     return procs
 
 
@@ -217,6 +239,7 @@ def check_admission_drift(
     pgid_of=os.getpgid,
     slack_mb: int = 8 * 1024,
     min_free_mb: int = MIN_FREE_HBM_MB,
+    pid_identity: bool = True,
 ) -> list[str]:
     """Re-verify admission during arm execution (P2-6): owner PID + HBM.
 
@@ -224,6 +247,12 @@ def check_admission_drift(
     expected_used_mb_by_npu: MB our own instances were expected to consume.
     npu_procs: NPU id -> pids attached mid-arm (from get_npu_processes).
     tracked_pgids_set: process groups we spawned (ours).
+
+    pid_identity=False disables per-PID ownership matching: on a
+    containerized multi-tenant host npu-smi reports *host* PIDs that are
+    invisible in our /proc, so PID identity can never be confirmed. In that
+    mode we still fail-close on HBM drift and on losing our process entirely,
+    but do not attribute a specific foreign PID.
 
     Returns violation strings; empty list == no drift, admission holds.
     """
@@ -242,6 +271,8 @@ def check_admission_drift(
             violations.append(
                 f"NPU{npu} owner drift: no process attached (expected our instance)")
             continue
+        if not pid_identity:
+            continue
         for pid in attached:
             try:
                 owned = pid in tracked_pgids_set or pgid_of(pid) in tracked_pgids_set
@@ -251,6 +282,20 @@ def check_admission_drift(
                 violations.append(
                     f"NPU{npu} owner drift: foreign pid={pid} attached to admitted device")
     return violations
+
+
+def _detect_pid_identity_possible() -> bool:
+    """Whether npu-smi PIDs resolve in our /proc (same PID namespace).
+
+    On a containerized multi-tenant host, npu-smi lists *host* PIDs that are
+    invisible inside the container, so PID-identity ownership checks always
+    false-positive. We detect that by checking whether any currently-attached
+    process (from other tenants on the same machine) is visible in /proc.
+    """
+    host_pids = [p for ps in get_npu_processes().values() for p in ps]
+    if not host_pids:
+        return True
+    return any(os.path.isdir(f"/proc/{p}") for p in host_pids)
 
 
 # =========================================================================
@@ -293,33 +338,98 @@ def stop_proc(proc):
             pass
 
 
-def start_server(pool_size="4096mb", log_dir=None, devices=None):
+def resolve_server_bin() -> str:
+    """Locate the pegaflow-server binary (explicit env > release > debug)."""
+    if _SERVER_BIN:
+        return _SERVER_BIN
+    candidates = [
+        PROJECT_ROOT / "target" / "release" / "pegaflow-server-py",
+        PROJECT_ROOT / "target" / "release" / "pegaflow-server",
+        PROJECT_ROOT / "target" / "debug" / "pegaflow-server",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return str(p)
+    return str(candidates[0])
+
+
+def _server_env() -> dict:
+    """Env for the pegaflow-server subprocess.
+
+    The server embeds Python (pyo3) and must resolve the conda env's
+    libpython + site-packages (torch, torch_npu). Without LD_LIBRARY_PATH the
+    dynamic loader falls back to the system libpython and the embedded
+    interpreter cannot import torch ("No module named 'torch'").
+    """
+    env = os.environ.copy()
+    conda_py = Path(CONDA_ROOT) / "envs" / CONDA_ENV / "bin" / "python"
+    try:
+        libdir = subprocess.check_output(
+            [str(conda_py), "-c",
+             "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))"],
+            timeout=15,
+        ).decode().strip()
+    except Exception:
+        libdir = ""
+    if libdir:
+        cur = env.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = libdir + (":" + cur if cur else "")
+    return env
+
+
+def start_server(pool_size="16gb", log_dir=None, devices=None):
     if devices is None:
         devices = list(range(NUM_INSTANCES))
     if log_dir is None:
         log_dir = LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
+    if _port_open("127.0.0.1", SERVER_PORT):
+        raise RuntimeError(
+            f"port {SERVER_PORT} already in use — a leftover pegaflow-server "
+            f"is still running; kill it before retrying")
     log = log_dir / "server.log"
     proc = subprocess.Popen(
         [
-            str(PROJECT_ROOT / "target" / "debug" / "pegaflow-server"),
+            resolve_server_bin(),
             "--addr", f"0.0.0.0:{SERVER_PORT}",
             "--pool-size", pool_size,
             "--devices", ",".join(str(d) for d in devices),
+            "--log-level", SERVER_LOG_LEVEL,
         ],
         stdout=open(log, "w"), stderr=subprocess.STDOUT,
+        env=_server_env(),
         preexec_fn=os.setsid,
     )
     _track_proc(proc)
-    deadline = time.time() + 30
+    # Readiness: the gRPC port accepting connections is authoritative. The
+    # log may be buffered when redirected to a file, and full startup (ACL
+    # init + 4 GiB pinned pool + NUMA probe) takes ~15-25 s, so allow 120 s.
+    deadline = time.time() + 120
     while time.time() < deadline:
         time.sleep(1)
-        try:
-            if log.exists() and "listening" in log.read_text():
-                return proc
-        except Exception:
-            pass
-    raise RuntimeError("Server failed to start")
+        if proc.poll() is not None:
+            break  # process died — report via the log tail below
+        if _port_open("127.0.0.1", SERVER_PORT):
+            return proc
+    tail = ""
+    try:
+        tail = "\n".join(log.read_text().splitlines()[-15:])
+    except Exception:
+        pass
+    raise RuntimeError(f"Server failed to start; log tail:\n{tail}")
+
+
+def _port_open(host: str, port: int) -> bool:
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(1)
+    try:
+        s.connect((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
 
 
 def start_vllm(port, mode, namespace, physical_npu, label, *,
@@ -336,7 +446,7 @@ def start_vllm(port, mode, namespace, physical_npu, label, *,
         env["PEGAFLOW_PORT"] = str(SERVER_PORT)
     gmu = gpu_memory_utilization
     cmd_parts = [
-        f"source /root/miniconda3/etc/profile.d/conda.sh && conda activate vllm-hust-dev",
+        f"source {CONDA_ROOT}/etc/profile.d/conda.sh && conda activate {CONDA_ENV}",
         f"vllm serve {model_path} --port {port} --dtype float16",
         f"--max-model-len 16384 --max-num-seqs 4",
         f"--gpu-memory-utilization {gmu:.2f}",
@@ -707,6 +817,18 @@ def merge_by_req_id(
                 if "queue_time_ms" in t:
                     r["queue_time_ms"] = t["queue_time_ms"]
 
+        # A fully-local prefix-cache hit (total_query_hashes == 0) never
+        # queries the backend: it has no prefetch and no DMA. It is a valid
+        # consumer outcome with hit_blocks=0, not a missing evidence event.
+        is_local_hit = cinfo.get("total_query_hashes", -1) == 0
+        if is_local_hit:
+            r["local_hit"] = True
+            r["missing_blocks"] = 0
+            r["dma_bytes"] = 0
+            r["dma_ms"] = 0.0
+            r["dma_gbps"] = 0.0
+            continue
+
         # Prefetch: exactly one server-side prefetch for this connector
         pref = prefetch_by_req.get(conn_key)
         if pref is None:
@@ -920,6 +1042,7 @@ def monitor_admission_drift(
     interval_s: float = ADMISSION_POLL_INTERVAL_S,
     sampler=None,
     pgid_of=os.getpgid,
+    pid_identity: bool = True,
 ) -> None:
     """Periodically re-verify admission during a phase (P2-6/R7).
 
@@ -942,7 +1065,8 @@ def monitor_admission_drift(
             continue
         drift = check_admission_drift(
             admitted, free_mb_pre, free_now, expected_used_mb_by_npu,
-            npu_procs, tracked_pgids_set, pgid_of=pgid_of)
+            npu_procs, tracked_pgids_set, pgid_of=pgid_of,
+            pid_identity=pid_identity)
         for v in drift:
             print(f"  [INVALID] {v}")
             violations_out.append(v)
@@ -1031,7 +1155,13 @@ def compute_paired_analysis(shared: list[dict], isolated: list[dict]) -> dict:
 def compute_stats(records: list[dict], key="ttft_s") -> dict:
     vals = sorted(r[key] for r in records if r.get(key, -1) > 0)
     if not vals:
-        return {"n": 0, "median": 0, "mean": 0, "std": 0}
+        # Empty arm (e.g. abort by fail-close) must still render every key the
+        # summary template reads, otherwise write_summary raises KeyError.
+        return {
+            "n": 0, "mean": 0.0, "median": 0.0, "std": 0.0,
+            "iqr": 0.0, "ci_95_low": 0.0, "ci_95_high": 0.0,
+            "min": 0.0, "max": 0.0,
+        }
     n = len(vals)
     mean = sum(vals) / n
     median = vals[n // 2] if n % 2 == 1 else (vals[n // 2 - 1] + vals[n // 2]) / 2
@@ -1369,12 +1499,27 @@ def main():
                         help="Independent lifecycles (default: 3)")
     parser.add_argument("--requests-per-phase", type=int, default=3,
                         help="Requests per phase (default: 3)")
-    parser.add_argument("--pool-size", type=str, default="4096mb")
+    parser.add_argument("--pool-size", type=str, default="16gb",
+                        help="Pinned pool size (default: 16gb — must hold the "
+                             "full prompt KV, else the cache evicts just-saved "
+                             "blocks and cross-instance hits go to 0)")
     parser.add_argument("--min-free-gb", type=int, default=28)
+    parser.add_argument("--num-instances", type=int, default=NUM_INSTANCES,
+                        help="Instances to admit per arm (default: from env / 8)")
+    parser.add_argument("--model", type=str, default=MODEL_PATH,
+                        help="Model path (default: from env / /data/shared-models/Qwen3-8B)")
     args = parser.parse_args()
 
     min_free_mb = args.min_free_gb * 1024
-    model_path = MODEL_PATH
+    model_path = args.model
+    num_instances = args.num_instances
+    # Containerized multi-tenant hosts report host PIDs via npu-smi that are
+    # invisible in our /proc; in that case PID-identity ownership checks are
+    # unreliable and we fall back to HBM-drift + process-presence checks.
+    pid_identity = _detect_pid_identity_possible()
+    if not pid_identity:
+        print("  [note] npu-smi PIDs do not resolve in /proc (container); "
+              "using HBM+presence admission checks")
     queries = USER_QUERIES[:args.requests_per_phase]
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -1428,13 +1573,15 @@ def main():
                     ns_base = f"{ISOLATED_NS_PREFIX}-c{cycle}"
 
                 # P1-1: Admitted-device check BEFORE starting server.
-                # Admission gate — only admit NPUs with enough free HBM.
-                # If < NUM_INSTANCES available, mark arm INVALID and skip.
+                # Admission gate — admit only NPUs with enough free HBM, in
+                # ascending device order. If < num_instances are free, the arm
+                # is INVALID and skipped (fail-close, never silently shrink).
                 free_mem = get_npu_free_memory()
-                admitted = [i for i in range(NUM_INSTANCES)
-                            if free_mem.get(i, -1) >= min_free_mb]
-                if len(admitted) < NUM_INSTANCES:
-                    print(f"  [INVALID] Only {len(admitted)}/{NUM_INSTANCES} "
+                free_devices = sorted(
+                    i for i in free_mem if free_mem.get(i, -1) >= min_free_mb)
+                admitted = free_devices[:num_instances]
+                if len(admitted) < num_instances:
+                    print(f"  [INVALID] Only {len(admitted)}/{num_instances} "
                           f"NPUs have >= {min_free_mb}MB free: {admitted}. "
                           f"Arm {arm_label} ABORTED.")
                     all_records.append({
@@ -1442,7 +1589,7 @@ def main():
                         "query_idx": -1, "instance": "INVALID", "npu": -1,
                         "port": -1, "query": "", "ttft_s": -1, "total_s": -1,
                         "ok": False, "text": "",
-                        "error": f"insufficient NPU free: {len(admitted)}/{NUM_INSTANCES}",
+                        "error": f"insufficient NPU free: {len(admitted)}/{num_instances}",
                         "producer": False,
                     })
                     continue
@@ -1489,7 +1636,8 @@ def main():
                 drift = check_admission_drift(
                     admitted, free_mem, get_npu_free_memory(),
                     {i: expected_used_mb(i, free_mem) for i in admitted},
-                    get_npu_processes(), tracked_pgids())
+                    get_npu_processes(), tracked_pgids(),
+                    pid_identity=pid_identity)
                 if drift:
                     print(f"  [INVALID] Admission drift after launch — "
                           f"arm {arm_label} ABORTED.")
@@ -1520,6 +1668,7 @@ def main():
                     args=(admitted, free_mem,
                           {i: expected_used_mb(i, free_mem) for i in admitted},
                           tracked_pgids(), stop_event, monitor_out),
+                    kwargs={"pid_identity": pid_identity},
                     daemon=True,
                 )
                 monitor.start()
@@ -1539,7 +1688,8 @@ def main():
                 drift = check_admission_drift(
                     admitted, free_mem, get_npu_free_memory(),
                     {i: expected_used_mb(i, free_mem) for i in admitted},
-                    get_npu_processes(), tracked_pgids())
+                    get_npu_processes(), tracked_pgids(),
+                    pid_identity=pid_identity)
                 drift_violations.extend(drift)
                 for v in drift:
                     print(f"  [INVALID] {v}")
@@ -1573,7 +1723,8 @@ def main():
             r"\[PegaKVConnector\] req=(?P<req_id>\S+)\s+"
             r"cache_lookup: hit_blocks=(?P<hit>\d+) "
             r"computed_blocks=(?P<computed>\d+) "
-            r"hit_tokens=(?P<hit_tokens>\d+) num_tokens=(?P<num_tokens>\d+)",
+            r"hit_tokens=(?P<hit_tokens>\d+) num_tokens=(?P<num_tokens>\d+)"
+            r"(?:.*?total_query_hashes=(?P<query_hashes>\d+))?",
             text,
         ):
             req_id = m.group("req_id")
@@ -1583,6 +1734,7 @@ def main():
             if entry is not None:
                 entry["occurrences"] = entry.get("occurrences", 1) + 1
                 continue
+            qh = m.group("query_hashes")
             connector_by_req[req_id] = {
                 "req_id": req_id,
                 "label": label,
@@ -1590,6 +1742,7 @@ def main():
                 "computed_blocks": int(m.group("computed")),
                 "hit_tokens": int(m.group("hit_tokens")),
                 "num_tokens": int(m.group("num_tokens")),
+                "total_query_hashes": int(qh) if qh is not None else -1,
                 "occurrences": 1,
             }
 
