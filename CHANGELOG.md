@@ -194,3 +194,27 @@
   robustness evidence (PegaFlow benefit is NOT eroded by co-tenant load),
   not as a pressure finding. Stronger pressure (long prompts, higher
   concurrency under gmu 0.95) is a follow-up.
+
+## 2026-08-20 — T6 (V4-Flash) sanity: hardware limitation, no code changes kept
+
+- T6 planned as the official TP8 KV-dedup scenario (DeepSeek-V3.2-style:
+  PegaFlow stores logical KV once across TP ranks; without it each rank
+  duplicates). Model: DeepSeek-V4-Flash-0731 (284B MoE, 13B active, CSA/HCA
+  compressed attention, 1M ctx, MIT).
+- Sanity findings (4 attempts):
+  1. `--dtype bfloat16` dequantizes FP8 weights -> OOM (39GB/card vs 61GB).
+  2. Auto dtype still OOM: vllm-ascend `_is_fused_moe_layer` version branch
+     imports `MoERunner` which does not exist in vllm-hust (0.23.1.dev576
+     fork exposes `RoutedExperts`; `FusedMoE` is a factory function).
+  3. Local patch (try/except MoERunner + RoutedExperts) fixed the OOM —
+     FP8/FP4 quantized weights loaded.
+  4. New failure: `customize_dtype is not supported by the current soc
+     version` — V4-Flash official weights use FP4 for MoE experts; **910B2
+     does not support FP4** (hardware generation limit, FP4 is 910C+).
+- Options recorded (not executed): (A) download official FP8 base repo
+  (295GB, all-FP8, runs on 910B2 at 35.5GB/card + 25GB KV headroom);
+  (B) local FP4->FP8 conversion; (C) fall back to V2-Lite for the MLA
+  cross-instance experiment.
+- The vllm-ascend-hust local patch was reverted (no pollution); the
+  version-mismatch finding (MoERunner vs RoutedExperts) is recorded here
+  for when upstream vllm-ascend aligns with the vllm-hust fork.
