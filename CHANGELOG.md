@@ -129,3 +129,92 @@
   075403 (same, chunked-batch defense), 083342 (fallback direction
   disambiguation). Manifests document the INVALID verdicts; raw logs
   gitignored. Superseded by the VALID runs (090625, 104618).
+
+## 2026-08-18 — T3/T4 runners
+
+- `scripts/run_perf_t3_hitrate.py`: hit-rate sensitivity (50/75/90/100%).
+  Prefix-ratio manipulation: warmup seeds full prompt, Q0 test keeps the
+  first ratio% identical + distinct filler (total length unchanged). Gate:
+  measured hit_blocks/76 within +/-5pp of target, else INVALID.
+- `scripts/run_perf_t4_len.py`: prompt-length gradient (1k/4k/8k/16k tokens)
+  via block repetition (chars/4 proxy).
+- `scripts/run_perf_base.py`: `Experiment.prompt_fn(query, query_idx)` for
+  custom prompt construction (query_idx -1 = warmup seed); dry-run skips
+  experiment-specific gates (synthetic records are 100%-hit; gates are
+  unit-tested instead).
+- Host gates: dry-run VALID for both runners; T3 hitrate gate unit-tested
+  (passes at target, fails off-target).
+
+## 2026-08-19 — T3 hit-rate sweep: 4/4 VALID, monotone, break-even below 50%
+
+- `results/perf-t3-h{50,75,90,100}/` — prefix-ratio manipulation
+  (shuffled-block filler, per-instance variants), one cycle each. All
+  **VALID**; hit-rate gate passed at each target (prereg deviation D:
+  first Q0 is the warmup instance's own repeat and is excluded from the
+  cross-instance hit-rate statistic).
+- Q0 per ratio:
+  - 50%: saved +288.1ms, DMA 46.3ms
+  - 75%: saved +439.1ms, DMA 70.0ms
+  - 90%: saved +595.3ms, DMA 80.3ms
+  - 100%: saved +608.9ms, DMA 95.6ms
+- Monotone in both directions; DMA scales with hit blocks (46->96ms).
+  All combos GO — break-even threshold lies below 50% hit rate (not
+  reached in this sweep).
+- Harness fixes landed during T3 bring-up: experiment-declared defaults
+  override CLI, consumer floor scales with experiment size, per-instance
+  prompt variants, density-matched filler.
+
+## 2026-08-19 — T4 prompt-length gradient: 4/4 VALID, break-even between 1k and 4k
+
+- `results/perf-t4-l{1,4,8,16}k/` — length gradient, one cycle each. All
+  **VALID** (hit-rate gate n/a; standard gates clean).
+- Q0 per length:
+  - 1k: saved -21.2ms, DMA 8.7ms → **BREAK-EVEN (negative)**
+  - 4k: saved +95.0ms, DMA 32.0ms → GO
+  - 8k: saved +382.6ms, DMA 59.6ms → GO
+  - 16k: saved +929.9ms, DMA 108.9ms → GO
+- Break-even length threshold lies between 1k and 4k tokens: below it the
+  prefill saving is too small to cover DMA + overhead (same logic as the
+  MLA negative example). DMA scales sub-linearly with length (8.7 -> 109ms
+  for 1k -> 16k).
+
+## 2026-08-19 — T5 shared-resource pressure, 2x2: 4/4 VALID, no erosion
+
+- `results/perf-t5-{a,b,c,d}/` — 2x2 (gmu 0.85/0.95 x external load on/off),
+  4 experiment instances x 3 cycles. All **VALID**, 0 request failures.
+- Q0 per combo:
+  - a baseline: saved +614.0ms, DMA 89.2ms, TBT p95 19.0ms
+  - b external load (4 placeholder instances): saved +603.3ms,
+    DMA 99.4ms, TBT p95 19.5ms
+  - c gmu 0.95: saved +616.9ms, DMA 88.0ms, TBT p95 18.9ms
+  - d full pressure: saved +619.4ms, DMA 88.4ms, TBT p95 20.7ms
+- Prereg deviation F (2026-08-19): pressure calibration was too weak —
+  external load only moved DMA +10ms and gmu 0.95 has no effect at 10k
+  tokens (KV 1.4GB vs 53GB pool). The result stands as multi-tenant
+  robustness evidence (PegaFlow benefit is NOT eroded by co-tenant load),
+  not as a pressure finding. Stronger pressure (long prompts, higher
+  concurrency under gmu 0.95) is a follow-up.
+
+## 2026-08-20 — T6 (V4-Flash) sanity: hardware limitation, no code changes kept
+
+- T6 planned as the official TP8 KV-dedup scenario (DeepSeek-V3.2-style:
+  PegaFlow stores logical KV once across TP ranks; without it each rank
+  duplicates). Model: DeepSeek-V4-Flash-0731 (284B MoE, 13B active, CSA/HCA
+  compressed attention, 1M ctx, MIT).
+- Sanity findings (4 attempts):
+  1. `--dtype bfloat16` dequantizes FP8 weights -> OOM (39GB/card vs 61GB).
+  2. Auto dtype still OOM: vllm-ascend `_is_fused_moe_layer` version branch
+     imports `MoERunner` which does not exist in vllm-hust (0.23.1.dev576
+     fork exposes `RoutedExperts`; `FusedMoE` is a factory function).
+  3. Local patch (try/except MoERunner + RoutedExperts) fixed the OOM —
+     FP8/FP4 quantized weights loaded.
+  4. New failure: `customize_dtype is not supported by the current soc
+     version` — V4-Flash official weights use FP4 for MoE experts; **910B2
+     does not support FP4** (hardware generation limit, FP4 is 910C+).
+- Options recorded (not executed): (A) download official FP8 base repo
+  (295GB, all-FP8, runs on 910B2 at 35.5GB/card + 25GB KV headroom);
+  (B) local FP4->FP8 conversion; (C) fall back to V2-Lite for the MLA
+  cross-instance experiment.
+- The vllm-ascend-hust local patch was reverted (no pollution); the
+  version-mismatch finding (MoERunner vs RoutedExperts) is recorded here
+  for when upstream vllm-ascend aligns with the vllm-hust fork.
