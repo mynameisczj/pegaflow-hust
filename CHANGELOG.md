@@ -70,3 +70,62 @@
   engine init measured 129s single-instance).
 - `pegaflow-server/src/registry.rs`: compile fix for IPC import timing log
   (adjacent string literals need explicit concatenation).
+
+## 2026-08-18 — T1 baseline: first 8-instance VALID matched trace
+
+- `results/perf-t1/20260818-090625/` — T1 baseline, 3 cycles × 8 instances
+  × 3 queries, Qwen3-8B, vllm-hust@HEAD, commit 021473b. Audit verdict
+  **VALID** (100% coverage, conservation OK, 0 violations, 144 records).
+  Raw logs gitignored (`results/perf-t1/*/logs/`); manifest committed.
+- Q0 (cross-instance): shared median 0.356s vs isolated 0.938s —
+  prefill saved +581.7ms, DMA cost 120.1ms → **GO** (CI excludes 0).
+- Q2: +58.3ms vs 3.5ms → **GO**. Q1: BREAK-EVEN (local prefix hit, expected).
+- TBT p95: 18.8ms both arms (no decode-path regression; TBT gate PASS).
+- Platform constraint recorded (prereg deviation C): 216 D2H + 42 H2D
+  batch calls fell back to per-copy (CANN batch 107000 on 8-instance
+  concurrency); completions data-correct. D2H chunking tracked.
+- Earlier runs today (072129/075403/083342) INVALID — retained locally as
+  negative evidence of the platform constraint, not committed.
+
+## 2026-08-18 — T1 rerun: batch DMA restored (allocator contract)
+
+- `results/perf-t1/20260818-104618/` — T1 rerun with
+  `PYTORCH_NPU_ALLOC_CONF=expandable_segments:True` + chunked batch defense.
+  Audit verdict **VALID**, 0 batch fallbacks (platform-constraint section
+  absent from manifest), conservation OK, 144 records.
+- Q0: shared 0.328s vs isolated 0.937s, prefill saved +609.1ms, DMA cost
+  90.5ms (vs 120.1ms under per-copy fallback in run 20260818-090625) → **GO**,
+  CI [531.6, 535.5]ms excludes 0.
+- DMA cost now matches the 20260813 5-instance VALID run (89ms) — batch
+  aclrtMemcpyBatchAsync (5472 copies, 71-101ms) fully restored.
+- Confirms root cause: torch_npu default-allocator memory is not batch-DMA
+  capable; expandable_segments memory is (comment "expandable_segments is
+  not DMA-capable" is outdated).
+
+## 2026-08-18 — T2 concurrency gradient: 9/9 combos VALID, no contention point
+
+- `results/perf-t2-c{1,4,8}-i{0,50,200}/` — 9 combos, one cycle each,
+  semaphore-limited concurrent sends. All **VALID**, 0 batch fallbacks.
+- Q0 (cross-instance) per combo:
+  - concurrency 1: saved ~611ms, DMA ~92ms
+  - concurrency 4: saved ~577ms, DMA ~122ms
+  - concurrency 8: saved ~556ms, DMA ~147ms
+- Batch interval (0/50/200ms) has no measurable effect; DMA cost scales
+  with concurrency only. All combos **GO** — no contention knee within the
+  scanned range (8-way DMA 147ms is far below the ~556ms prefill saving).
+- Safe operating region: concurrency <= 8 (full scanned range). Burst
+  negative example (32 requests, unlimited semaphore, +56%) still stands
+  as the pathological boundary.
+- Harness robustness fixes landed during the sweep (all host-verified):
+  empty req_id no longer duplicate-matches all connector keys; startup
+  retry (1x) for slow engine init; kill_tracked kills descendant processes
+  (vLLM EngineCore spawns a new process group); launch timeout 900s.
+
+## 2026-08-18 — INVALID runs archived as platform-constraint negative evidence
+
+- `results/perf-t1/20260818-{072129,075403,083342}/` — three INVALID T1
+  runs preserved per prereg §8 (negative-example retention): 072129
+  (default-allocator batch 107000 -> fallback evidence rules),
+  075403 (same, chunked-batch defense), 083342 (fallback direction
+  disambiguation). Manifests document the INVALID verdicts; raw logs
+  gitignored. Superseded by the VALID runs (090625, 104618).
