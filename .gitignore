@@ -37,4 +37,4 @@ docs/hardware-environment.md
 docs/p2-3-benchmarks.md
 
 # Perf artifacts: VALID manifest committed, raw logs ignored
-results/perf-t1/*/logs/
+results/perf-*/**/logs/
